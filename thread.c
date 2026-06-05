@@ -17,6 +17,53 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <stdatomic.h>
+#include <sched.h>
+
+#define cpu_relax() asm volatile("rep; nop")
+
+typedef struct {
+    atomic_int state; /* 0=unlocked, 1=locked */
+} spinlock_t;
+
+/* Number of PAUSE (cpu_relax) iterations before falling back to sched_yield.
+ * Set via MEMCACHED_PAUSE_COUNT env var at startup. 0 = no spinning. */
+static int global_pause_count = 0;
+
+static void spinlock_init(spinlock_t *sl) {
+    atomic_init(&sl->state, 0);
+}
+
+static void spinlock_lock(spinlock_t *sl) {
+    while (1) {
+        /* First test: spin with cpu_relax reading in Shared state.
+         * No RFO traffic while lock is held by another thread. */
+        for (int i = 0; i < global_pause_count; i++) {
+            if (atomic_load_explicit(&sl->state, memory_order_relaxed) == 0)
+                break;
+            cpu_relax();
+        }
+        /* Test-and-Set: attempt to acquire with CAS (Exclusive state). */
+        int expected = 0;
+        if (atomic_compare_exchange_weak_explicit(
+                &sl->state, &expected, 1,
+                memory_order_acquire, memory_order_relaxed))
+            return;
+        /* CAS failed: yield and retry. */
+        sched_yield();
+    }
+}
+
+static int spinlock_trylock(spinlock_t *sl) {
+    int expected = 0;
+    return atomic_compare_exchange_strong_explicit(
+        &sl->state, &expected, 1,
+        memory_order_acquire, memory_order_relaxed) ? 0 : -1;
+}
+
+static void spinlock_unlock(spinlock_t *sl) {
+    atomic_store_explicit(&sl->state, 0, memory_order_release);
+}
 
 #include "queue.h"
 #include "tls.h"
@@ -78,7 +125,7 @@ static pthread_mutex_t stats_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Lock to cause worker threads to hang up after being woken */
 static pthread_mutex_t worker_hang_lock;
 
-static pthread_mutex_t *item_locks;
+static spinlock_t *item_locks;
 /* size of the item lock hash table */
 static uint32_t item_lock_count;
 static unsigned int item_lock_hashpower;
@@ -115,23 +162,23 @@ static void thread_libevent_ionotify(evutil_socket_t fd, short which, void *arg)
  */
 
 void item_lock(uint32_t hv) {
-    mutex_lock(&item_locks[hv & hashmask(item_lock_hashpower)]);
+    spinlock_lock(&item_locks[hv & hashmask(item_lock_hashpower)]);
 }
 
 void *item_trylock(uint32_t hv) {
-    pthread_mutex_t *lock = &item_locks[hv & hashmask(item_lock_hashpower)];
-    if (pthread_mutex_trylock(lock) == 0) {
+    spinlock_t *lock = &item_locks[hv & hashmask(item_lock_hashpower)];
+    if (spinlock_trylock(lock) == 0) {
         return lock;
     }
     return NULL;
 }
 
 void item_trylock_unlock(void *lock) {
-    mutex_unlock((pthread_mutex_t *) lock);
+    spinlock_unlock((spinlock_t *) lock);
 }
 
 void item_unlock(uint32_t hv) {
-    mutex_unlock(&item_locks[hv & hashmask(item_lock_hashpower)]);
+    spinlock_unlock(&item_locks[hv & hashmask(item_lock_hashpower)]);
 }
 
 static void wait_for_thread_registration(int nthreads) {
@@ -1118,13 +1165,19 @@ void memcached_thread_init(int nthreads, void *arg) {
     item_lock_count = hashsize(power);
     item_lock_hashpower = power;
 
-    item_locks = calloc(item_lock_count, sizeof(pthread_mutex_t));
+    item_locks = calloc(item_lock_count, sizeof(spinlock_t));
     if (! item_locks) {
         perror("Can't allocate item locks");
         exit(1);
     }
     for (i = 0; i < item_lock_count; i++) {
-        pthread_mutex_init(&item_locks[i], NULL);
+        spinlock_init(&item_locks[i]);
+    }
+
+    const char *pause_env = getenv("MEMCACHED_PAUSE_COUNT");
+    if (pause_env) {
+        global_pause_count = atoi(pause_env);
+        fprintf(stderr, "[spinlock] pause_count = %d\n", global_pause_count);
     }
 
     threads = calloc(nthreads, sizeof(LIBEVENT_THREAD));
