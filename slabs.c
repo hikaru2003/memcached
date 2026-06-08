@@ -48,7 +48,7 @@ static size_t mem_avail = 0;
 /**
  * Access to the slab allocator is protected by this lock
  */
-static pthread_mutex_t slabs_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t slabs_lock;
 
 /*
  * Forward Declarations
@@ -202,6 +202,12 @@ unsigned int slabs_fixup(char *chunk, const int border) {
 void slabs_init(const size_t limit, const double factor, const bool prealloc, const uint32_t *slab_sizes, void *mem_base_external, bool reuse_mem) {
     int i = POWER_SMALLEST - 1;
     unsigned int size = sizeof(item) + settings.chunk_size;
+
+    pthread_mutexattr_t slabs_lock_attr;
+    pthread_mutexattr_init(&slabs_lock_attr);
+    pthread_mutexattr_settype(&slabs_lock_attr, PTHREAD_MUTEX_ADAPTIVE_NP);
+    pthread_mutex_init(&slabs_lock, &slabs_lock_attr);
+    pthread_mutexattr_destroy(&slabs_lock_attr);
 
     /* Some platforms use runtime transparent hugepages. If for any reason
      * the initial allocation fails, the required settings do not persist

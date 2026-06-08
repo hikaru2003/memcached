@@ -1123,9 +1123,13 @@ void memcached_thread_init(int nthreads, void *arg) {
         perror("Can't allocate item locks");
         exit(1);
     }
+    pthread_mutexattr_t item_lock_attr;
+    pthread_mutexattr_init(&item_lock_attr);
+    pthread_mutexattr_settype(&item_lock_attr, PTHREAD_MUTEX_ADAPTIVE_NP);
     for (i = 0; i < item_lock_count; i++) {
-        pthread_mutex_init(&item_locks[i], NULL);
+        pthread_mutex_init(&item_locks[i], &item_lock_attr);
     }
+    pthread_mutexattr_destroy(&item_lock_attr);
 
     threads = calloc(nthreads, sizeof(LIBEVENT_THREAD));
     if (! threads) {
