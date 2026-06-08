@@ -17,53 +17,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <stdatomic.h>
-#include <sched.h>
+#include "spinlock.h"
 
-#define cpu_relax() asm volatile("rep; nop")
-
-typedef struct {
-    atomic_int state; /* 0=unlocked, 1=locked */
-} spinlock_t;
-
-/* Number of PAUSE (cpu_relax) iterations before falling back to sched_yield.
- * Set via MEMCACHED_PAUSE_COUNT env var at startup. 0 = no spinning. */
-static int global_pause_count = 0;
-
-static void spinlock_init(spinlock_t *sl) {
-    atomic_init(&sl->state, 0);
-}
-
-static void spinlock_lock(spinlock_t *sl) {
-    while (1) {
-        /* First test: spin with cpu_relax reading in Shared state.
-         * No RFO traffic while lock is held by another thread. */
-        for (int i = 0; i < global_pause_count; i++) {
-            if (atomic_load_explicit(&sl->state, memory_order_relaxed) == 0)
-                break;
-            cpu_relax();
-        }
-        /* Test-and-Set: attempt to acquire with CAS (Exclusive state). */
-        int expected = 0;
-        if (atomic_compare_exchange_weak_explicit(
-                &sl->state, &expected, 1,
-                memory_order_acquire, memory_order_relaxed))
-            return;
-        /* CAS failed: yield and retry. */
-        sched_yield();
-    }
-}
-
-static int spinlock_trylock(spinlock_t *sl) {
-    int expected = 0;
-    return atomic_compare_exchange_strong_explicit(
-        &sl->state, &expected, 1,
-        memory_order_acquire, memory_order_relaxed) ? 0 : -1;
-}
-
-static void spinlock_unlock(spinlock_t *sl) {
-    atomic_store_explicit(&sl->state, 0, memory_order_release);
-}
+int global_spin_rounds     = 30;
+int global_pause_per_round = 0;
 
 #include "queue.h"
 #include "tls.h"
@@ -1174,11 +1131,16 @@ void memcached_thread_init(int nthreads, void *arg) {
         spinlock_init(&item_locks[i]);
     }
 
-    const char *pause_env = getenv("MEMCACHED_PAUSE_COUNT");
-    if (pause_env) {
-        global_pause_count = atoi(pause_env);
-        fprintf(stderr, "[spinlock] pause_count = %d\n", global_pause_count);
+    const char *rounds_env = getenv("MEMCACHED_SPIN_ROUNDS");
+    if (rounds_env) {
+        global_spin_rounds = atoi(rounds_env);
     }
+    const char *ppr_env = getenv("MEMCACHED_PAUSE_PER_ROUND");
+    if (ppr_env) {
+        global_pause_per_round = atoi(ppr_env);
+    }
+    fprintf(stderr, "[spinlock] spin_rounds=%d  pause_per_round=%d\n",
+            global_spin_rounds, global_pause_per_round);
 
     threads = calloc(nthreads, sizeof(LIBEVENT_THREAD));
     if (! threads) {

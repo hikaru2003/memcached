@@ -6,6 +6,7 @@
  * a multiplier factor from there, up to half the maximum slab size.
  */
 #include "memcached.h"
+#include "spinlock.h"
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -48,7 +49,7 @@ static size_t mem_avail = 0;
 /**
  * Access to the slab allocator is protected by this lock
  */
-static pthread_mutex_t slabs_lock = PTHREAD_MUTEX_INITIALIZER;
+static spinlock_t slabs_lock = SPINLOCK_INITIALIZER;
 
 /*
  * Forward Declarations
@@ -345,9 +346,9 @@ static int do_grow_slab_list(const unsigned int id) {
 
 int slabs_grow_slab_list(const unsigned int id) {
     int ret = 0;
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     ret = do_grow_slab_list(id);
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
     return ret;
 }
 
@@ -530,7 +531,7 @@ static void do_slabs_free(void *ptr, unsigned int id) {
  */
 void fill_slab_stats_automove(slab_stats_automove *am) {
     int n;
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     for (n = 0; n < MAX_NUMBER_OF_SLAB_CLASSES; n++) {
         slabclass_t *p = &slabclass[n];
         slab_stats_automove *cur = &am[n];
@@ -539,7 +540,7 @@ void fill_slab_stats_automove(slab_stats_automove *am) {
         cur->total_pages = p->slabs;
         cur->chunk_size = p->size;
     }
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
 }
 
 /* TODO: slabs_available_chunks should grow up to encompass this.
@@ -547,11 +548,11 @@ void fill_slab_stats_automove(slab_stats_automove *am) {
  */
 unsigned int global_page_pool_size(bool *mem_flag) {
     unsigned int ret = 0;
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     if (mem_flag != NULL)
         *mem_flag = mem_malloced >= mem_limit ? true : false;
     ret = slabclass[SLAB_GLOBAL_PAGE_POOL].slabs;
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
     return ret;
 }
 
@@ -659,22 +660,22 @@ static void memory_release(void) {
 void *slabs_alloc(unsigned int id, unsigned int flags) {
     void *ret;
 
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     ret = do_slabs_alloc(id, flags);
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
     return ret;
 }
 
 void slabs_free(void *ptr, unsigned int id) {
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     do_slabs_free(ptr, id);
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
 }
 
 void slabs_stats(ADD_STAT add_stats, void *c) {
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     do_slabs_stats(add_stats, c);
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
 }
 
 static bool do_slabs_adjust_mem_limit(size_t new_mem_limit) {
@@ -690,9 +691,9 @@ static bool do_slabs_adjust_mem_limit(size_t new_mem_limit) {
 
 bool slabs_adjust_mem_limit(size_t new_mem_limit) {
     bool ret;
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     ret = do_slabs_adjust_mem_limit(new_mem_limit);
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
     return ret;
 }
 
@@ -701,14 +702,14 @@ unsigned int slabs_available_chunks(const unsigned int id, bool *mem_flag,
     unsigned int ret;
     slabclass_t *p;
 
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     p = &slabclass[id];
     ret = p->sl_curr;
     if (mem_flag != NULL)
         *mem_flag = mem_malloced >= mem_limit ? true : false;
     if (chunks_perslab != NULL)
         *chunks_perslab = p->perslab;
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
     return ret;
 }
 
@@ -718,10 +719,10 @@ void *slabs_peek_page(const unsigned int id, uint32_t *size, uint32_t *perslab) 
     if (id > power_largest) {
         return NULL;
     }
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     s_cls = &slabclass[id];
     if (s_cls->slabs < 2) {
-        pthread_mutex_unlock(&slabs_lock);
+        spinlock_unlock(&slabs_lock);
         return NULL;
     }
     *size = s_cls->size;
@@ -729,7 +730,7 @@ void *slabs_peek_page(const unsigned int id, uint32_t *size, uint32_t *perslab) 
 
     page = s_cls->slab_list[0];
 
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
 
     return page;
 }
@@ -751,7 +752,7 @@ void do_slabs_unlink_free_chunk(const unsigned int id, item *it) {
 }
 
 void slabs_finalize_page_move(const unsigned int sid, const unsigned int did, void *page) {
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     slabclass_t *s_cls = &slabclass[sid];
     slabclass_t *d_cls = &slabclass[did];
 
@@ -780,14 +781,14 @@ void slabs_finalize_page_move(const unsigned int sid, const unsigned int did, vo
         memory_release();
     }
 
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
 }
 /* Iterate at most once through the slab classes and pick a "random" source.
  * I like this better than calling rand() since rand() is slow enough that we
  * can just check all of the classes once instead.
  */
 int slabs_pick_any_for_reassign(const unsigned int did) {
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     static int cur = POWER_SMALLEST - 1;
     int tries = MAX_NUMBER_OF_SLAB_CLASSES - POWER_SMALLEST + 1;
     for (; tries > 0; tries--) {
@@ -797,27 +798,27 @@ int slabs_pick_any_for_reassign(const unsigned int did) {
         if (cur == did)
             continue;
         if (slabclass[cur].slabs > 1) {
-            pthread_mutex_unlock(&slabs_lock);
+            spinlock_unlock(&slabs_lock);
             return cur;
         }
     }
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
     return -1;
 }
 
 int slabs_page_count(const unsigned int id) {
     int ret;
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     ret = slabclass[id].slabs;
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
     return ret;
 }
 
 int slabs_locked_callback(slabs_cb cb, void *arg) {
     int ret = 0;
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
     ret = cb(arg);
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
 
     return ret;
 }
@@ -829,9 +830,9 @@ int slabs_locked_callback(slabs_cb cb, void *arg) {
  * into callbacks when an interface becomes more obvious.
  */
 void slabs_mlock(void) {
-    pthread_mutex_lock(&slabs_lock);
+    spinlock_lock(&slabs_lock);
 }
 
 void slabs_munlock(void) {
-    pthread_mutex_unlock(&slabs_lock);
+    spinlock_unlock(&slabs_lock);
 }
