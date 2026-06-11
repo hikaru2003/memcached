@@ -16,7 +16,41 @@
 #include <event.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <unistd.h>
+
+/* ---------------------------------------------------------------
+ * Hybrid spinlock: [pthread_mutex_trylock → cpu_relax] × N → pthread_mutex_lock
+ * N is controlled by MEMCACHED_PAUSE_COUNT env var (0 = no spinning).
+ * --------------------------------------------------------------- */
+#define cpu_relax() asm volatile("rep; nop")
+
+typedef struct {
+    pthread_mutex_t mutex;
+} spinlock_t;
+
+extern int global_pause_count;
+
+static inline void spinlock_init(spinlock_t *sl) {
+    pthread_mutex_init(&sl->mutex, NULL);
+}
+
+static inline void spinlock_lock(spinlock_t *sl) {
+    for (int i = 0; i < global_pause_count; i++) {
+        if (pthread_mutex_trylock(&sl->mutex) == 0)
+            return;
+        cpu_relax();
+    }
+    pthread_mutex_lock(&sl->mutex);
+}
+
+static inline int spinlock_trylock(spinlock_t *sl) {
+    return pthread_mutex_trylock(&sl->mutex) == 0 ? 0 : -1;
+}
+
+static inline void spinlock_unlock(spinlock_t *sl) {
+    pthread_mutex_unlock(&sl->mutex);
+}
 #include <assert.h>
 #include <grp.h>
 #include <signal.h>

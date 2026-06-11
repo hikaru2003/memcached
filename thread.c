@@ -20,50 +20,8 @@
 #include <stdatomic.h>
 #include <sched.h>
 
-#define cpu_relax() asm volatile("rep; nop")
-
-typedef struct {
-    atomic_int state; /* 0=unlocked, 1=locked */
-} spinlock_t;
-
-/* Number of PAUSE (cpu_relax) iterations before falling back to sched_yield.
- * Set via MEMCACHED_PAUSE_COUNT env var at startup. 0 = no spinning. */
-static int global_pause_count = 0;
-
-static void spinlock_init(spinlock_t *sl) {
-    atomic_init(&sl->state, 0);
-}
-
-static void spinlock_lock(spinlock_t *sl) {
-    while (1) {
-        /* First test: spin with cpu_relax reading in Shared state.
-         * No RFO traffic while lock is held by another thread. */
-        for (int i = 0; i < global_pause_count; i++) {
-            if (atomic_load_explicit(&sl->state, memory_order_relaxed) == 0)
-                break;
-            cpu_relax();
-        }
-        /* Test-and-Set: attempt to acquire with CAS (Exclusive state). */
-        int expected = 0;
-        if (atomic_compare_exchange_weak_explicit(
-                &sl->state, &expected, 1,
-                memory_order_acquire, memory_order_relaxed))
-            return;
-        /* CAS failed: yield and retry. */
-        sched_yield();
-    }
-}
-
-static int spinlock_trylock(spinlock_t *sl) {
-    int expected = 0;
-    return atomic_compare_exchange_strong_explicit(
-        &sl->state, &expected, 1,
-        memory_order_acquire, memory_order_relaxed) ? 0 : -1;
-}
-
-static void spinlock_unlock(spinlock_t *sl) {
-    atomic_store_explicit(&sl->state, 0, memory_order_release);
-}
+/* global_pause_count is declared extern in memcached.h; defined here */
+int global_pause_count = 0;
 
 #include "queue.h"
 #include "tls.h"
