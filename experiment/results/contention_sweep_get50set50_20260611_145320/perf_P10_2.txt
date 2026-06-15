@@ -1,0 +1,10 @@
+
+ Performance counter stats for process id '984166':
+
+         4,791,847      context-switches                                                      
+            14,577      cpu-migrations                                                        
+   177,789,235,901      cycles                                                                
+   137,788,038,667      instructions                     #    0.78  insn per cycle            
+
+      30.000687185 seconds time elapsed
+

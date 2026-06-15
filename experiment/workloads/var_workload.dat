@@ -1,0 +1,28 @@
+# Facebook VAR workload approximation
+# Source: Atikoglu et al., SIGMETRICS 2012 + Protego (NSDI 2023) §5.3
+#
+# VAR characteristics:
+#   - 82% SET (write-dominated, slabs_lock bottleneck)
+#   - 18% GET
+#   - Zipf key distribution: s=1.107 (10% keys -> 90% requests)
+#   - 100,000 key-value pairs
+#   - No DELETE (not DB-backed)
+#   - Value size ~500B (browser state data, Figure 2b approximation)
+
+workload=site.ycsb.workloads.CoreWorkload
+
+requestdistribution=zipfian
+zipfconstant=1.107
+
+recordcount=100000
+operationcount=999999999
+maxexecutiontime=30
+
+readproportion=0.18
+updateproportion=0.82
+insertproportion=0.0
+scanproportion=0.0
+deleteproportion=0.0
+
+fieldcount=1
+fieldlength=500

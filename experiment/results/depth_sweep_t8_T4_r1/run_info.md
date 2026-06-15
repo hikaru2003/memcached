@@ -1,0 +1,11 @@
+# Run info
+- date: 2026-06-12 14:31:36
+- commit: 80de1d8
+- branch: experiment/pause-spinlock
+- mc_threads: 8 (cpus: 0-3)
+- mut_threads: 4 (cpus: 4-7)
+- records: 1 / update_ratio: 0.5
+- warmup: 10s / duration: 30s / runs: 3
+- pause_count: 0
+- depth_sweep: 1 2 4 8 16 32
+- conns_sweep: 1 4 16 64
