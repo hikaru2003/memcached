@@ -23,6 +23,15 @@
 /* global_pause_count is declared extern in memcached.h; defined here */
 int global_pause_count = 0;
 
+/* Per-worker-thread pointer (void* in header to avoid forward-decl issues) */
+__thread void *tl_me = NULL;
+
+/* Called from spinlock_lock() when futex fallback occurs. No atomic needed:
+ * only the owning thread writes, main thread reads after pthread_join. */
+void spinlock_note_futex(void) {
+    ((LIBEVENT_THREAD *)tl_me)->spinlock_futex_count++;
+}
+
 #include "queue.h"
 #include "tls.h"
 
@@ -511,6 +520,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
  */
 static void *worker_libevent(void *arg) {
     LIBEVENT_THREAD *me = arg;
+    tl_me = me;  /* enable per-thread futex counter in spinlock_note_futex() */
 
     /* Any per-thread setup can happen here; memcached_thread_init() will block until
      * all threads have finished initializing.

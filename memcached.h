@@ -31,6 +31,17 @@ typedef struct {
 
 extern int global_pause_count;
 
+/*
+ * Per-thread context pointer for the spinlock futex counter.
+ * Set to LIBEVENT_THREAD* by worker_libevent(); NULL in non-worker threads.
+ * Typed as void* here to avoid forward-declaring LIBEVENT_THREAD before it
+ * is fully defined later in this header.
+ */
+extern __thread void *tl_me;
+
+/* Increments ((LIBEVENT_THREAD *)tl_me)->spinlock_futex_count; defined in thread.c */
+void spinlock_note_futex(void);
+
 static inline void spinlock_init(spinlock_t *sl) {
     pthread_mutex_init(&sl->mutex, NULL);
 }
@@ -41,6 +52,8 @@ static inline void spinlock_lock(spinlock_t *sl) {
             return;
         cpu_relax();
     }
+    /* fell through to futex-based mutex: record per-thread (no atomic) */
+    if (tl_me) spinlock_note_futex();
     pthread_mutex_lock(&sl->mutex);
 }
 
@@ -777,6 +790,7 @@ typedef struct {
     char   *ssl_wbuf;
 #endif
     int napi_id;                /* napi id associated with this thread */
+    uint64_t spinlock_futex_count; /* futex fallback count (debug/futex-count branch only) */
 #ifdef PROXY
     void *proxy_ctx; // proxy global context
     void *L; // lua VM

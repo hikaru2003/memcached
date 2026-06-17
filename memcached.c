@@ -4263,6 +4263,21 @@ static void sig_usrhandler(const int sig) {
     stop_main_loop = GRACE_STOP;
 }
 
+/* SIGUSR2: print per-thread spinlock futex fallback counts, then reset.
+ * Used by run_futex_sweep.sh: send after warmup (reset) and after measurement (read+reset).
+ * Not async-signal-safe in strict terms, but acceptable for a debug build. */
+static void sig_usr2handler(const int sig) {
+    uint64_t total = 0;
+    int n = settings.num_threads;
+    for (int i = 0; i < n; i++) {
+        LIBEVENT_THREAD *t = get_worker_thread(i);
+        total += t->spinlock_futex_count;
+        t->spinlock_futex_count = 0;
+    }
+    fprintf(stderr, "SPINLOCK_FUTEX_COUNT: %" PRIu64 "\n", total);
+    fflush(stderr);
+}
+
 /*
  * On systems that supports multiple page sizes we may reduce the
  * number of TLB-misses by using the biggest available page size
@@ -4864,6 +4879,7 @@ int main (int argc, char **argv) {
     signal(SIGTERM, sig_handler);
     signal(SIGHUP, sighup_handler);
     signal(SIGUSR1, sig_usrhandler);
+    signal(SIGUSR2, sig_usr2handler);
 
     /* init settings */
     settings_init();
