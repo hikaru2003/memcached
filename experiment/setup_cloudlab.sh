@@ -31,7 +31,17 @@
 
 set -uo pipefail
 
-BASE_DIR="${BASE_DIR:-$HOME/Application}"
+# CloudLab の pg.Execute は root で実行される。
+# root の場合、実験ユーザ（uid>=1000）のホームを自動検出して BASE_DIR を設定する。
+if [ "$(id -u)" = "0" ] && [ -z "${BASE_DIR:-}" ]; then
+    ACTUAL_USER=$(getent passwd | awk -F: '$3 >= 1000 && $1 != "nobody" {print $1; exit}')
+    ACTUAL_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
+    BASE_DIR="${ACTUAL_HOME}/Application"
+    echo "[setup] Running as root, detected experiment user: $ACTUAL_USER (home: $ACTUAL_HOME)"
+else
+    BASE_DIR="${BASE_DIR:-$HOME/Application}"
+fi
+
 MC_BRANCH="${MC_BRANCH:-experiment/mysql-like-utdelay}"
 SKIP_PKG="${SKIP_PKG:-}"
 SKIP_BUILD="${SKIP_BUILD:-}"
@@ -251,6 +261,10 @@ cd "\${MC_DIR}"
 bash experiment/run_utdelay_sweep.sh
 WRAPPER_EOF
 chmod +x "$WRAPPER"
+# root で実行された場合、生成ファイルの所有者を実験ユーザに変更
+if [ "$(id -u)" = "0" ] && [ -n "${ACTUAL_USER:-}" ]; then
+    chown -R "$ACTUAL_USER" "$BASE_DIR" "$WRAPPER" 2>/dev/null || true
+fi
 
 echo ""
 echo "[4/4] Done."

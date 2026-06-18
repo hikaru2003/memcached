@@ -82,8 +82,9 @@ if hw_type:
 
 # ---------------------------------------------------------------------------
 # Startup: auto-run setup_cloudlab.sh
-# Runs as the experiment user (not root); sudo is available inside the script.
-# Log: ~/setup_memcached.log
+# pg.Execute runs as root on CloudLab; log to /tmp/ (world-readable).
+# setup_cloudlab.sh detects the non-root experiment user automatically.
+# Log: /tmp/setup_memcached.log
 # ---------------------------------------------------------------------------
 SETUP_URL = (
     "https://raw.githubusercontent.com/hikaru2003/memcached"
@@ -92,7 +93,7 @@ SETUP_URL = (
 
 node.addService(pg.Execute(
     shell="bash",
-    command="curl -fsSL '{}' | bash > $HOME/setup_memcached.log 2>&1".format(SETUP_URL)
+    command="curl -fsSL '{}' | bash > /tmp/setup_memcached.log 2>&1".format(SETUP_URL)
 ))
 
 # Print the RSpec
