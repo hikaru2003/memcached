@@ -113,7 +113,7 @@ else
 fi
 
 if [ -z "$SKIP_BUILD" ]; then
-    echo "  Building memcached ..."
+    echo "  Building memcached (utdelay branch) ..."
     cd "$MC_DIR"
     ./autogen.sh 2>&1 | tail -3
     ./configure 2>&1 | tail -5
@@ -122,6 +122,25 @@ if [ -z "$SKIP_BUILD" ]; then
         echo "[ERROR] memcached build failed" >&2; exit 1
     fi
     echo "  Built: $MC_DIR/memcached"
+    cd - >/dev/null
+
+    # master バイナリのビルド（baseline 比較用）
+    echo "  Building memcached_master (master branch) ..."
+    MASTER_BUILD_DIR="${BASE_DIR}/memcached_master_src"
+    if [ -d "$MASTER_BUILD_DIR/.git" ]; then
+        git -C "$MASTER_BUILD_DIR" pull origin master 2>&1 | tail -2 || true
+    else
+        git clone --branch master "$MC_REPO" "$MASTER_BUILD_DIR"
+    fi
+    cd "$MASTER_BUILD_DIR"
+    ./autogen.sh 2>&1 | tail -3
+    ./configure 2>&1 | tail -5
+    make -j"$(nproc)" 2>&1 | tail -5
+    if [ ! -x "$MASTER_BUILD_DIR/memcached" ]; then
+        echo "[ERROR] memcached_master build failed" >&2; exit 1
+    fi
+    cp "$MASTER_BUILD_DIR/memcached" "$MC_DIR/memcached_master"
+    echo "  Built: $MC_DIR/memcached_master"
     cd - >/dev/null
 fi
 echo "[2/4] Done."
@@ -237,6 +256,7 @@ MC_DIR="$MC_DIR"
 MUTILATE_DIR="$MUTILATE_DIR"
 
 export MEMCACHED_BIN="\${MC_DIR}/memcached"
+export MEMCACHED_MASTER_BIN="\${MC_DIR}/memcached_master"
 export MUTILATE_BIN="\${MUTILATE_DIR}/mutilate"
 export MC_THREADS=4
 export MUT_THREADS=4
@@ -244,11 +264,11 @@ export MUT_CONNS=1
 export DEPTH=32
 export RECORDS=1
 export UPDATE_RATIO=0.5
-export WARMUP_SEC=180
+export WARMUP_SEC=300
 export DURATION=60
-export RUNS=10
+export RUNS=20
 export SPIN_ROUNDS=30
-export PAUSE_PER_ROUND_VALUES="${PAUSE_REC}"
+export PAUSE_PER_ROUND_VALUES="0 1 2 3 4 5 6 7 8 9 10 15 20 30 50 80 100 150 200"
 export PORT=11222
 export MC_CPUS="${MC_CPUS_REC}"
 export WL_CPUS="${WL_CPUS_REC}"
