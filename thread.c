@@ -18,6 +18,13 @@
 #include <string.h>
 #include <pthread.h>
 
+/* Per-worker-thread pointer for contention counting (debug/futex-count-master) */
+__thread void *tl_me = NULL;
+
+void item_note_futex(void) {
+    ((LIBEVENT_THREAD *)tl_me)->futex_count++;
+}
+
 #include "queue.h"
 #include "tls.h"
 
@@ -115,7 +122,12 @@ static void thread_libevent_ionotify(evutil_socket_t fd, short which, void *arg)
  */
 
 void item_lock(uint32_t hv) {
-    mutex_lock(&item_locks[hv & hashmask(item_lock_hashpower)]);
+    pthread_mutex_t *lock = &item_locks[hv & hashmask(item_lock_hashpower)];
+    if (pthread_mutex_trylock(lock) == 0)
+        return;
+    /* trylock failed → contended → futex path */
+    if (tl_me) item_note_futex();
+    pthread_mutex_lock(lock);
 }
 
 void *item_trylock(uint32_t hv) {
@@ -506,6 +518,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
  */
 static void *worker_libevent(void *arg) {
     LIBEVENT_THREAD *me = arg;
+    tl_me = me;  /* enable per-thread futex counter */
 
     /* Any per-thread setup can happen here; memcached_thread_init() will block until
      * all threads have finished initializing.

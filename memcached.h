@@ -743,6 +743,7 @@ typedef struct {
     char   *ssl_wbuf;
 #endif
     int napi_id;                /* napi id associated with this thread */
+    uint64_t futex_count;      /* contended item_lock count (debug/futex-count-master only) */
 #ifdef PROXY
     void *proxy_ctx; // proxy global context
     void *L; // lua VM
@@ -1032,6 +1033,10 @@ void threadlocal_stats_aggregate(struct thread_stats *stats);
 void slab_stats_aggregate(struct thread_stats *stats, struct slab_stats *out);
 void thread_setname(pthread_t thread, const char *name);
 LIBEVENT_THREAD *get_worker_thread(int id);
+
+/* Per-worker-thread pointer; NULL in non-worker threads (debug/futex-count-master) */
+extern __thread void *tl_me;
+void item_note_futex(void); /* increments ((LIBEVENT_THREAD *)tl_me)->futex_count */
 
 /* Stat processing functions */
 void append_stat(const char *name, ADD_STAT add_stats, conn *c,
