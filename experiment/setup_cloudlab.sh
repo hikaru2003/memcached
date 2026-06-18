@@ -115,7 +115,7 @@ fi
 if [ -z "$SKIP_BUILD" ]; then
     echo "  Building memcached ..."
     cd "$MC_DIR"
-    autoreconf -fi 2>&1 | tail -3
+    ./autogen.sh 2>&1 | tail -3
     ./configure 2>&1 | tail -5
     make -j"$(nproc)" 2>&1 | tail -5
     if [ ! -x "$MC_DIR/memcached" ]; then
