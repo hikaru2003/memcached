@@ -1,11 +1,17 @@
 # futex sweep / memcached_debug_futex / mc=4 / mutilate -T 4 -c 1 -d 32 -r 1 -u 0.5 / n=3
 
-futex_per_op = futex_count / (QPS × DURATION)
-小さいほどスピンでロック取得 (futex fallback が少ない)
+futex_per_op = trylock失敗 → mutex_lock 移行回数 / (QPS × DURATION)
+※ futex_wait syscall 回数ではない。mutex_lock 内で userspace CAS 成功の場合は futex に落ちない。
+小さいほどスピンでロック取得 (mutex_lock 移行が少ない)
+
+NOTE: pause=0 の結果は 2026-06-18 再計測値（debug_futex_sweep_mc4_mut4_run2）で置き換え済み。
+旧バイナリは for ループが 0 回実行されるバグにより全 item_lock() 呼び出しがカウントされていた（旧値: futex_per_op=2.000）。
+新バイナリでは spinlock_lock() 先頭に初期 trylock を追加し、trylock 失敗時のみカウントするよう修正。
 
 | pause_count | mean_QPS | mean_futex_per_sec | mean_futex_per_op | cv_qps% | n |
 |---|---|---|---|---|---|
-| 0 | 688912.3 | 1377832.367 | 2.000 | 0.07 | 3 |
+| master | 707188.1 | 340832.7 | 0.482 | 0.27 | 3 |
+| 0 | 728123.7 | 453684.8 | 0.623 | 0.33 | 3 |
 | 10 | 957540.6 | 110105.567 | 0.115 | 0.25 | 3 |
 | 20 | 922252.7 | 27381.367 | 0.030 | 0.10 | 3 |
 | 30 | 902746.6 | 6394.367 | 0.007 | 0.01 | 3 |

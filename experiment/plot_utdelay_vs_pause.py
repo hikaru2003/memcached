@@ -26,8 +26,8 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 
-PAUSE_DIR   = "experiment/results/pause_d32_mc4_mut4_run2"
-UTDELAY_DIR = "experiment/results/utdelay_sweep_20260618_135202"
+PAUSE_DIR   = "experiment/results/pause_d32_mc4_mut4_run3/get50_set50"
+UTDELAY_DIR = "experiment/results/utdelay_sweep_series/new_mc4"
 OUT_DIR     = "experiment/graphs"
 os.makedirs(OUT_DIR, exist_ok=True)
 

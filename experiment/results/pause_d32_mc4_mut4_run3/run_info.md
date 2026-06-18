@@ -7,7 +7,7 @@
 - mut_conns: 1 / total_conns: 4
 - depth: 32
 - records: 1
-- update_ratio_sweep: 0.0 1.0
+- update_ratio_sweep: 0.0 0.5 1.0
 - warmup: 300s / duration: 60s / runs: 10
 - pause_values: 0 10 20 30 40 50 60 70 80 90 100 200 300
 - master_bin: ./memcached_master

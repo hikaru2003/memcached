@@ -1,0 +1,99 @@
+/usr/bin/java  -classpath /home/morisaki/Application/ycsb-0.17.0/conf:/home/morisaki/Application/ycsb-0.17.0/lib/HdrHistogram-2.1.4.jar:/home/morisaki/Application/ycsb-0.17.0/lib/core-0.17.0.jar:/home/morisaki/Application/ycsb-0.17.0/lib/htrace-core4-4.1.0-incubating.jar:/home/morisaki/Application/ycsb-0.17.0/lib/jackson-core-asl-1.9.4.jar:/home/morisaki/Application/ycsb-0.17.0/lib/jackson-mapper-asl-1.9.4.jar:/home/morisaki/Application/ycsb-0.17.0/memcached-binding/lib/HdrHistogram-2.1.4.jar:/home/morisaki/Application/ycsb-0.17.0/memcached-binding/lib/core-0.17.0.jar:/home/morisaki/Application/ycsb-0.17.0/memcached-binding/lib/htrace-core4-4.1.0-incubating.jar:/home/morisaki/Application/ycsb-0.17.0/memcached-binding/lib/jackson-core-asl-1.9.4.jar:/home/morisaki/Application/ycsb-0.17.0/memcached-binding/lib/jackson-mapper-asl-1.9.13.jar:/home/morisaki/Application/ycsb-0.17.0/memcached-binding/lib/log4j-1.2.17.jar:/home/morisaki/Application/ycsb-0.17.0/memcached-binding/lib/memcached-binding-0.17.0.jar:/home/morisaki/Application/ycsb-0.17.0/memcached-binding/lib/spymemcached-2.11.4.jar site.ycsb.Client -t -db site.ycsb.db.MemcachedClient -s -P ./experiment/workloads/var_workload.dat -p memcached.hosts=127.0.0.1:11222 -p maxexecutiontime=30 -threads 16
+Command line: -t -db site.ycsb.db.MemcachedClient -s -P ./experiment/workloads/var_workload.dat -p memcached.hosts=127.0.0.1:11222 -p maxexecutiontime=30 -threads 16
+YCSB Client 0.17.0
+
+Loading workload...
+log4j:WARN No appenders could be found for logger (org.apache.htrace.core.Tracer).
+log4j:WARN Please initialize the log4j system properly.
+log4j:WARN See http://logging.apache.org/log4j/1.2/faq.html#noconfig for more info.
+Starting test.
+2026-06-08 15:30:21:964 0 sec: 0 operations; est completion in 0 second 
+Maximum execution time specified as: 30 secs
+2026-06-08 15:30:22.047 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.048 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.048 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.048 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.048 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.049 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.049 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.049 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.050 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+2026-06-08 15:30:22.051 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+2026-06-08 15:30:22.052 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.053 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+2026-06-08 15:30:22.056 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+2026-06-08 15:30:22.057 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+2026-06-08 15:30:22.057 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+2026-06-08 15:30:22.058 INFO net.spy.memcached.MemcachedConnection:  Added {QA sa=/127.0.0.1:11222, #Rops=0, #Wops=0, #iq=0, topRop=null, topWop=null, toWrite=0, interested=0} to connect queue
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+DBWrapper: report latency for each error is false and specific error codes to track for latency are: []
+2026-06-08 15:30:31:964 10 sec: 598675 operations; 59867.5 current ops/sec; est completion in 4 hours 38 minutes [READ: Count=107711, Max=33343, Min=68, Avg=257.38, 90=381, 99=950, 99.9=3645, 99.99=5491] [UPDATE: Count=492008, Max=55359, Min=65, Avg=261.86, 90=390, 99=983, 99.9=3695, 99.99=6947] 
+2026-06-08 15:30:41:964 20 sec: 1385253 operations; 78657.8 current ops/sec; est completion in 4 hours [READ: Count=141383, Max=9503, Min=66, Avg=199.52, 90=266, 99=349, 99.9=742, 99.99=2715] [UPDATE: Count=644264, Max=10111, Min=64, Avg=201.49, 90=270, 99=358, 99.9=695, 99.99=2727] 
+Maximum time elapsed. Requesting stop for the workload.
+Stop requested for workload. Now Joining!
+2026-06-08 15:30:51:964 30 sec: 2167882 operations; 78262.9 current ops/sec; est completion in 3 hours 50 minutes [READ: Count=140836, Max=4089, Min=63, Avg=200.26, 90=267, 99=350, 99.9=605, 99.99=2845] [UPDATE: Count=641771, Max=5687, Min=60, Avg=202.7, 90=271, 99=361, 99.9=637, 99.99=2417] 
+2026-06-08 15:30:51.976 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.976 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.976 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.977 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.977 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.977 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.978 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.978 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.978 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.978 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.979 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.979 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.979 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.979 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.979 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51.980 INFO net.spy.memcached.MemcachedConnection:  Shut down memcached client
+2026-06-08 15:30:51:977 30 sec: 2168079 operations; 15153.85 current ops/sec; est completion in 3 hours 50 minutes [READ: Count=27, Max=2813, Min=112, Avg=353.74, 90=257, 99=2813, 99.9=2813, 99.99=2813] [CLEANUP: Count=16, Max=9151, Min=7888, Avg=8543.88, 90=9095, 99=9151, 99.9=9151, 99.99=9151] [UPDATE: Count=79, Max=3093, Min=70, Avg=319.28, 90=599, 99=2723, 99.9=3093, 99.99=3093] 
+[OVERALL], RunTime(ms), 30014
+[OVERALL], Throughput(ops/sec), 72235.59005797295
+[TOTAL_GCS_G1_Young_Generation], Count, 50
+[TOTAL_GC_TIME_G1_Young_Generation], Time(ms), 62
+[TOTAL_GC_TIME_%_G1_Young_Generation], Time(%), 0.20657026720863597
+[TOTAL_GCS_G1_Concurrent_GC], Count, 0
+[TOTAL_GC_TIME_G1_Concurrent_GC], Time(ms), 0
+[TOTAL_GC_TIME_%_G1_Concurrent_GC], Time(%), 0.0
+[TOTAL_GCS_G1_Old_Generation], Count, 0
+[TOTAL_GC_TIME_G1_Old_Generation], Time(ms), 0
+[TOTAL_GC_TIME_%_G1_Old_Generation], Time(%), 0.0
+[TOTAL_GCs], Count, 50
+[TOTAL_GC_TIME], Time(ms), 62
+[TOTAL_GC_TIME_%], Time(%), 0.20657026720863597
+[READ], Operations, 389957
+[READ], AverageLatency(us), 215.78159899681248
+[READ], MinLatency(us), 63
+[READ], MaxLatency(us), 33343
+[READ], 95thPercentileLatency(us), 333
+[READ], 99thPercentileLatency(us), 560
+[READ], Return=OK, 389957
+[CLEANUP], Operations, 16
+[CLEANUP], AverageLatency(us), 8543.875
+[CLEANUP], MinLatency(us), 7888
+[CLEANUP], MaxLatency(us), 9151
+[CLEANUP], 95thPercentileLatency(us), 9103
+[CLEANUP], 99thPercentileLatency(us), 9151
+[UPDATE], Operations, 1778122
+[UPDATE], AverageLatency(us), 218.63838364296714
+[UPDATE], MinLatency(us), 60
+[UPDATE], MaxLatency(us), 55359
+[UPDATE], 95thPercentileLatency(us), 340
+[UPDATE], 99thPercentileLatency(us), 578
+[UPDATE], Return=OK, 1778122
