@@ -92,9 +92,7 @@ SETUP_URL = (
 
 node.addService(pg.Execute(
     shell="bash",
-    command=(
-        f"curl -fsSL '{SETUP_URL}' | bash > $HOME/setup_memcached.log 2>&1"
-    )
+    command="curl -fsSL '{}' | bash > $HOME/setup_memcached.log 2>&1".format(SETUP_URL)
 ))
 
 # Print the RSpec
