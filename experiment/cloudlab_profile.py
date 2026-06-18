@@ -26,23 +26,26 @@ request = pc.makeRequestRSpec()
 
 # ---------------------------------------------------------------------------
 # Architecture → hardware type mapping
-# Wisconsin (CloudLab) node types. Update if using a different cluster.
+# Verified from simple_mysql experiment results on CloudLab.
+# PAUSE cycles/instr measured values (from result/2026_6_3/README.md):
+#   ivy_c8220:     14.56 cyc   broadwell_xl170: 12.34 cyc
+#   skylake_c220g5: 141.97 cyc  icelake_sm110:  38.86 cyc
+#   emerald_c6620:  37.15 cyc
 # ---------------------------------------------------------------------------
 arch_options = [
-    ("skylake",        "Skylake       (c220g5 / Xeon Silver 4114)"),
-    ("broadwell",      "Broadwell     (c220g4 / Xeon E5-2630 v4)"),
-    ("ivybridge",      "Ivy Bridge    (c220g2 / Xeon E5-2660 v2)"),
-    ("icelake",        "Ice Lake      (c6420  / Xeon Gold 6338)"),
-    ("emeraldrapids",  "Emerald Rapids(c6620  / Xeon Gold 6554S)"),
+    ("skylake",        "Skylake       (c220g5 / Xeon Silver 4114,  PAUSE≈142cyc)"),
+    ("broadwell",      "Broadwell     (xl170  / Xeon E5-2640 v4,   PAUSE≈12cyc)"),
+    ("ivybridge",      "Ivy Bridge    (c8220  / Xeon E5-2650 v2,   PAUSE≈15cyc)"),
+    ("icelake",        "Ice Lake      (sm110  / Xeon Gold 6338,    PAUSE≈39cyc)"),
+    ("emeraldrapids",  "Emerald Rapids(c6620  / Xeon Gold 6554S,   PAUSE≈37cyc)"),
 ]
 
-# Hardware type strings for each arch (Wisconsin cluster defaults)
-# Edit here if instantiating on a different cluster
+# Hardware type strings — verified against simple_mysql result directory names
 HW_MAP = {
     "skylake":        "c220g5",
-    "broadwell":      "c220g4",
-    "ivybridge":      "c220g2",
-    "icelake":        "c6420",
+    "broadwell":      "xl170",
+    "ivybridge":      "c8220",
+    "icelake":        "sm110",
     "emeraldrapids":  "c6620",
 }
 
@@ -71,8 +74,8 @@ hw_type  = params.phystype_override if params.phystype_override else HW_MAP.get(
 # ---------------------------------------------------------------------------
 node = request.RawPC("node0")
 
-# Ubuntu 22.04: known to work with our build (apt packages verified)
-node.disk_image = "urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU22-64-STD"
+# Ubuntu 24.04: matches simple_mysql profile default (verified on all 5 arch nodes)
+node.disk_image = "urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU24-64-STD"
 
 if hw_type:
     node.hardware_type = hw_type
