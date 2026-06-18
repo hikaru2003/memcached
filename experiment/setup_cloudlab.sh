@@ -248,7 +248,13 @@ chmod +x "$WRAPPER"
 echo ""
 echo "[4/4] Done."
 
-# ---- git 認証案内 ----
+# ---- myfork remote を SSH URL で設定（ssh -A で agent forwarding 前提）----
+if git -C "$MC_DIR" remote | grep -q "^myfork$"; then
+    git -C "$MC_DIR" remote set-url myfork git@github.com:hikaru2003/memcached.git
+else
+    git -C "$MC_DIR" remote add myfork git@github.com:hikaru2003/memcached.git
+fi
+
 echo ""
 echo "============================================================"
 echo " Setup complete!"
@@ -262,14 +268,7 @@ echo " Run experiment:"
 echo "   bash ~/run_utdelay_experiment.sh"
 echo ""
 echo " After experiment, push results:"
-echo "   bash $MC_DIR/experiment/push_results.sh"
+echo "   cd $MC_DIR && bash experiment/push_results.sh"
 echo ""
-echo "------------------------------------------------------------"
-echo " GitHub push 設定（初回のみ）:"
-echo "   # SSH key 生成 & 登録"
-echo "   ssh-keygen -t ed25519 -C 'cloudlab-${ARCH_NAME}' -f ~/.ssh/id_ed25519_github -N ''"
-echo "   cat ~/.ssh/id_ed25519_github.pub"
-echo "   # → https://github.com/settings/keys に追加"
-echo "   git -C $MC_DIR remote set-url myfork git@github.com:hikaru2003/memcached.git"
-echo "   ssh -T git@github.com  # 接続確認"
-echo "------------------------------------------------------------"
+echo " ※ GitHub push は ssh -A でログインすれば agent forwarding で認証される"
+echo "============================================================"
