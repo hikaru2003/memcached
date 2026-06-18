@@ -1,0 +1,11 @@
+# Run info (utdelay sweep)
+- date: 2026-06-18 13:52:02
+- commit: 6565a68
+- branch: experiment/mysql-like-utdelay
+- binary: ./memcached
+- mc_threads: 4 (cpus: 0-3)
+- mut: -T 4 -c 1 -d 32 -r 1 -u 0.5
+- warmup: 180s / duration: 60s / runs: 10
+- spin_rounds: 30 (fixed)
+- pause_per_round values: 3
+- est_time: ~13 min
