@@ -1,0 +1,11 @@
+# Run info (hold-time sweep)
+- date: 2026-06-18 13:06:35
+- commit: a5af7b3
+- branch: debug/hold-time
+- spinlock_bin: ./memcached_debug_hold
+- master_bin: ./memcached_debug_hold_master
+- mc_threads: 4
+- mut: -T 4 -c 1 -d 32
+- records: 1  update_ratio: 0.5
+- warmup: 10s  duration: 10s
+- pause_values: 0 10 20 30 40 50 60 70 80 90 100 200 300
