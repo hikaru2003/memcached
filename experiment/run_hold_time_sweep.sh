@@ -28,7 +28,10 @@
 #   WL_CPUS              - mutilate CPU affinity            (default: 4-7)
 #
 # Output:
-#   stdout に PAUSE_COUNT ごとの avg_cycles テーブルを表示（ファイル保存なし）
+#   experiment/results/debug_hold_time_mc{MC}_mut{MUT}/
+#     run_info.md  - 実験パラメータ
+#     summary.md   - PAUSE別 avg_cycles テーブル（master 含む）
+#     raw.csv      - label,avg_cycles,lock_count,avg_ns の生データ
 #
 # Prerequisites:
 #   - ./memcached_debug_hold: debug/hold-time ブランチのビルド
@@ -52,6 +55,11 @@ DURATION="${DURATION:-10}"
 PORT="${PORT:-11222}"
 MC_CPUS="${MC_CPUS:-0-3}"
 WL_CPUS="${WL_CPUS:-4-7}"
+
+_BASE="experiment/results/debug_hold_time_mc${MC_THREADS}_mut${MUT_THREADS}"
+RESULT_DIR="$_BASE"
+_i=2; while [ -d "$RESULT_DIR" ]; do RESULT_DIR="${_BASE}_run${_i}"; _i=$((_i+1)); done
+mkdir -p "$RESULT_DIR"
 
 MC_PID=""
 cleanup() {
@@ -98,9 +106,35 @@ measure_one() {
     avg=$(echo "$line" | awk '{print $4}')
     count=$(echo "$line" | awk '{print $3}')
     local avg_ns
-    avg_ns=$(awk "BEGIN { printf \"%.1f\", ${avg:-0} / 3.0 }")
+    avg_ns=$(awk "BEGIN { printf \"%.1f\", ${avg:-0} / 2.1 }")
     printf "%-14s %15s %15s %15s\n" "$1_label" "${avg:-N/A}" "${count:-N/A}" "$avg_ns"
 }
+
+{
+    echo "# Run info (hold-time sweep)"
+    echo "- date: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "- commit: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "- branch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+    echo "- spinlock_bin: $MEMCACHED_BIN"
+    echo "- master_bin: $MEMCACHED_MASTER_BIN"
+    echo "- mc_threads: $MC_THREADS"
+    echo "- mut: -T $MUT_THREADS -c $MUT_CONNS -d $DEPTH"
+    echo "- records: $RECORDS  update_ratio: $UPDATE_RATIO"
+    echo "- warmup: ${WARMUP_SEC}s  duration: ${DURATION}s"
+    echo "- pause_values: $PAUSE_VALUES"
+} > "$RESULT_DIR/run_info.md"
+
+{
+    echo "# hold-time sweep / mc=${MC_THREADS} / mutilate -T ${MUT_THREADS} -c ${MUT_CONNS} -d ${DEPTH} -r ${RECORDS} -u ${UPDATE_RATIO}"
+    echo ""
+    echo "avg_cycles = total_hold_cycles / lock_count (rdtsc, both spin and futex paths)"
+    echo "master = pthread_mutex のみ（スピンなし）"
+    echo ""
+    echo "| label | avg_cycles | lock_count | avg_ns(2.1GHz) |"
+    echo "|---|---|---|---|"
+} > "$RESULT_DIR/summary.md"
+
+echo "label,avg_cycles,lock_count,avg_ns_3ghz" > "$RESULT_DIR/raw.csv"
 
 echo "============================================================"
 echo " hold-time sweep  (SIGUSR2 / rdtsc)"
@@ -108,8 +142,9 @@ echo "============================================================"
 echo " pause_values: $PAUSE_VALUES"
 echo " warmup: ${WARMUP_SEC}s  measure: ${DURATION}s"
 echo " records: $RECORDS  update_ratio: $UPDATE_RATIO"
+echo " results: $RESULT_DIR"
 echo ""
-printf "%-14s %15s %15s %15s\n" "label" "avg_cycles" "lock_count" "avg_ns(3GHz)"
+printf "%-14s %15s %15s %15s\n" "label" "avg_cycles" "lock_count" "avg_ns(2.1GHz)"
 printf "%-14s %15s %15s %15s\n" "-----" "----------" "----------" "------------"
 
 # --- master baseline (PAUSE_COUNT は無効、pthread_mutex のみ) ---
@@ -130,8 +165,10 @@ kill -USR2 "$MC_PID" 2>/dev/null; sleep 0.2
 line=$(grep "SPINLOCK_HOLD_CYCLES:" "$log" | tail -1)
 avg=$(echo "$line" | awk '{print $4}')
 count=$(echo "$line" | awk '{print $3}')
-avg_ns=$(awk "BEGIN { printf \"%.1f\", ${avg:-0} / 3.0 }")
+avg_ns=$(awk "BEGIN { printf \"%.1f\", ${avg:-0} / 2.1 }")
 printf "%-14s %15s %15s %15s\n" "master" "${avg:-N/A}" "${count:-N/A}" "$avg_ns"
+echo "| master | ${avg:-N/A} | ${count:-N/A} | $avg_ns |" >> "$RESULT_DIR/summary.md"
+echo "master,${avg:-0},${count:-0},$avg_ns" >> "$RESULT_DIR/raw.csv"
 rm -f "$log"; cleanup; sleep 0.5
 
 # --- pause-spinlock sweep ---
@@ -153,11 +190,14 @@ for pause in $PAUSE_VALUES; do
     line=$(grep "SPINLOCK_HOLD_CYCLES:" "$log" | tail -1)
     avg=$(echo "$line" | awk '{print $4}')
     count=$(echo "$line" | awk '{print $3}')
-    avg_ns=$(awk "BEGIN { printf \"%.1f\", ${avg:-0} / 3.0 }")
+    avg_ns=$(awk "BEGIN { printf \"%.1f\", ${avg:-0} / 2.1 }")
     printf "%-14s %15s %15s %15s\n" "pause=$pause" "${avg:-N/A}" "${count:-N/A}" "$avg_ns"
+    echo "| pause=$pause | ${avg:-N/A} | ${count:-N/A} | $avg_ns |" >> "$RESULT_DIR/summary.md"
+    echo "pause=$pause,${avg:-0},${count:-0},$avg_ns" >> "$RESULT_DIR/raw.csv"
 
     rm -f "$log"; cleanup; sleep 0.5
 done
 
 echo ""
+echo "Results: $RESULT_DIR"
 echo "master と pause sweep の avg_cycles がほぼ一致すれば計測は正しい。"
