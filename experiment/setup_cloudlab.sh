@@ -224,7 +224,7 @@ fi
 # 全アーキ共通のスイープ値（グラフ比較のため統一）
 # SPIN_ROUNDS=30固定なので total_pause_budget = N * 30
 # Skylake(142cyc)でN=200 → 852K cycles、Ivy(15cyc)でN=200 → 90K cycles
-PAUSE_REC="0 1 2 3 5 8 10 15 20 30 50 80 100 150 200"
+PAUSE_REC="0 1 2 3 4 5 6 7 8 9 10 15 20 30 50 80 100 150 200"
 
 echo "  Arch guess : $ARCH_NAME  ($PAUSE_NOTE)"
 echo "  PAUSE sweep: $PAUSE_REC  (unified across all arch for graph comparison)"
