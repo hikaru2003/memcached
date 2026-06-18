@@ -3,212 +3,229 @@
 #   cd /home/morisaki/Application/memcached
 #   ./experiment/run_pause_sweep.sh
 #
-# Parameters (env vars, all optional):
-#   MEMCACHED_BIN  - path to memcached binary                  (default: ./memcached)
-#   MUTILATE_BIN   - path to mutilate binary                   (default: ../mutilate/mutilate)
-#   WARMUP_SEC     - warmup duration in seconds per run        (default: 10)
-#   DURATION       - measurement duration in seconds per run   (default: 30)
-#   RUNS           - number of repeated measurements per PAUSE (default: 5)
-#   MC_THREADS     - memcached worker threads                  (default: 32)
-#   MUT_THREADS    - mutilate client threads                   (default: 4)
-#   MUT_CONNS      - mutilate connections per thread           (default: 4)
-#   RECORDS        - key range (1 = single-slot contention)    (default: 1)
-#   UPDATE_RATIO   - set:total ratio 0.0-1.0                   (default: 0.5)
-#   PORT           - memcached port                            (default: 11222)
-#   PAUSE_VALUES   - space-separated PAUSE_COUNT list
-#                    (default: "0 10 20 30 40 50 60 70 80 90 100")
+# Description:
+#   pause-spinlock ブランチ用 PAUSE_COUNT スイープ。
+#   スピンロック実装: [pthread_mutex_trylock -> cpu_relax(PAUSE)] x N -> pthread_mutex_lock
+#   N = MEMCACHED_PAUSE_COUNT で制御。
+#   最初に master baseline（スピンなし専用バイナリ）を計測し、その後 N sweep を実行する。
+#
+# Parameters (env vars):
+#   MEMCACHED_BIN        - pause-spinlock バイナリ         (default: ./memcached)
+#   MEMCACHED_MASTER_BIN - master バイナリ（スピンなし）   (default: ./memcached_master)
+#   MUTILATE_BIN         - mutilate バイナリ               (default: ../mutilate/mutilate)
+#   MC_THREADS           - memcached ワーカースレッド数    (default: 4)
+#   MUT_THREADS          - mutilate クライアントスレッド数 (default: 4)
+#   MUT_CONNS            - mutilate コネクション/スレッド  (default: 1)
+#   DEPTH                - mutilate pipeline depth (-d)    (default: 32)
+#   RECORDS              - key range (-r)                  (default: 1)
+#   UPDATE_RATIO         - SET 割合 (-u)                   (default: 0.5)
+#   WARMUP_SEC           - warmup 秒数                    (default: 300)
+#   DURATION             - 計測秒数                       (default: 60)
+#   RUNS                 - 各 N のラン数                   (default: 20)
+#   PAUSE_COUNT_VALUES   - N sweep 値                     (default: 0..10 + 15,20,30,50,80,100,150,200)
+#   PORT                 - memcached ポート               (default: 11222)
+#   MC_CPUS              - memcached CPU affinity         (default: 0-3)
+#   WL_CPUS              - mutilate CPU affinity          (default: 4-7)
 #
 # Output:
 #   experiment/results/pause_sweep_YYYYMMDD_HHMMSS/
-#     summary.md           - per-PAUSE statistics in Markdown table format
-#     raw.csv              - all individual run QPS values
-#     run_<PAUSE>_<N>.log  - raw mutilate output per (PAUSE, run)
+#     run_info.md  - 実験パラメータ
+#     summary.md   - master baseline + N別 QPS 統計テーブル
+#     raw.csv      - 全ランの生データ
+#     raw/         - mutilate ログ
 #
 # Prerequisites:
-#   - memcached built on experiment/pause-spinlock branch (spinlock.h + slabs.c)
-#   - mutilate binary at ../mutilate/mutilate
+#   - ./memcached: experiment/pause-spinlock ブランチのビルド
+#   - ./memcached_master: master ブランチのビルド（スピンなし baseline 用）
+#   - mutilate binary at ../mutilate/mutilate (or set MUTILATE_BIN)
 
 set -uo pipefail
 
 MEMCACHED_BIN="${MEMCACHED_BIN:-./memcached}"
+MEMCACHED_MASTER_BIN="${MEMCACHED_MASTER_BIN:-./memcached_master}"
 MUTILATE_BIN="${MUTILATE_BIN:-../mutilate/mutilate}"
-WARMUP_SEC="${WARMUP_SEC:-10}"
-DURATION="${DURATION:-30}"
-RUNS="${RUNS:-5}"
-MC_THREADS="${MC_THREADS:-32}"
+MC_THREADS="${MC_THREADS:-4}"
 MUT_THREADS="${MUT_THREADS:-4}"
-MUT_CONNS="${MUT_CONNS:-4}"
+MUT_CONNS="${MUT_CONNS:-1}"
+DEPTH="${DEPTH:-32}"
 RECORDS="${RECORDS:-1}"
 UPDATE_RATIO="${UPDATE_RATIO:-0.5}"
+WARMUP_SEC="${WARMUP_SEC:-300}"
+DURATION="${DURATION:-60}"
+RUNS="${RUNS:-20}"
+PAUSE_COUNT_VALUES="${PAUSE_COUNT_VALUES:-0 1 2 3 4 5 6 7 8 9 10 15 20 30 50 80 100 150 200}"
 PORT="${PORT:-11222}"
-PAUSE_VALUES="${PAUSE_VALUES:-0 10 20 30 40 50 60 70 80 90 100}"
+MC_CPUS="${MC_CPUS:-0-3}"
+WL_CPUS="${WL_CPUS:-4-7}"
 
-RESULT_DIR="experiment/results/pause_sweep_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$RESULT_DIR"
+RUN_DATE=$(date '+%Y%m%d_%H%M%S')
+RESULT_DIR="experiment/results/pause_sweep_${RUN_DATE}"
+mkdir -p "$RESULT_DIR/raw"
+
+n_vals=$(echo "$PAUSE_COUNT_VALUES" | wc -w)
+est_sec=$(( (n_vals + 1) * (WARMUP_SEC + DURATION * RUNS) ))
+est_min=$(( est_sec / 60 ))
 
 {
-    echo "# experiment/pause-spinlock / t=${MC_THREADS} / mutilate -T ${MUT_THREADS} -c ${MUT_CONNS} -r ${RECORDS} -u ${UPDATE_RATIO} / n=${RUNS}"
+    echo "# Run info (pause-spinlock sweep)"
+    echo "- date: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "- commit: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "- branch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+    echo "- spinlock_bin: $MEMCACHED_BIN"
+    echo "- master_bin:   $MEMCACHED_MASTER_BIN"
+    echo "- mc_threads: $MC_THREADS (cpus: $MC_CPUS)"
+    echo "- mut: -T $MUT_THREADS -c $MUT_CONNS -d $DEPTH -r $RECORDS -u $UPDATE_RATIO"
+    echo "- warmup: ${WARMUP_SEC}s / duration: ${DURATION}s / runs: $RUNS"
+    echo "- pause_count values: $PAUSE_COUNT_VALUES"
+    echo "- est_time: ~${est_min} min"
+} > "$RESULT_DIR/run_info.md"
+
+{
+    echo "# pause-spinlock sweep / mc=${MC_THREADS} / mutilate -T ${MUT_THREADS} -c ${MUT_CONNS} -d ${DEPTH} -r ${RECORDS} -u ${UPDATE_RATIO} / n=${RUNS}"
     echo ""
-    echo "| pause_count | mean_QPS | median_QPS | stddev_QPS | cv_pct | read_avg_us | read_p99_us | n |"
-    echo "|---|---|---|---|---|---|---|---|"
+    echo "spinlock: [trylock -> PAUSE x 1] x N -> mutex_lock  (N = MEMCACHED_PAUSE_COUNT)"
+    echo "master: pthread_mutex_lock のみ（スピンなし）"
+    echo ""
+    echo "| label | pause_count | mean_QPS | median_QPS | stddev | cv% | n |"
+    echo "|---|---|---|---|---|---|---|"
 } > "$RESULT_DIR/summary.md"
-echo "PAUSE_COUNT,run,QPS" > "$RESULT_DIR/raw.csv"
+
+echo "label,pause_count,run,QPS,r_avg_us,r_p99_us,w_avg_us,w_p99_us" \
+    > "$RESULT_DIR/raw.csv"
 
 MC_PID=""
-
 cleanup() {
     if [ -n "$MC_PID" ] && kill -0 "$MC_PID" 2>/dev/null; then
-        kill "$MC_PID" 2>/dev/null
-        wait "$MC_PID" 2>/dev/null
+        kill "$MC_PID" 2>/dev/null; wait "$MC_PID" 2>/dev/null
     fi
     MC_PID=""
 }
 trap cleanup EXIT
 
 start_memcached() {
-    local pause_count=$1
+    local bin=$1 pause_count=$2
     cleanup
-    MEMCACHED_PAUSE_COUNT=$pause_count \
-        "$MEMCACHED_BIN" -p "$PORT" -t "$MC_THREADS" -m 256 -u nobody 2>&1 &
+    if [ "$pause_count" = "master" ]; then
+        taskset -c "$MC_CPUS" "$bin" \
+            -p "$PORT" -t "$MC_THREADS" -m 256 -u nobody 2>&1 &
+    else
+        MEMCACHED_PAUSE_COUNT="$pause_count" \
+            taskset -c "$MC_CPUS" "$bin" \
+            -p "$PORT" -t "$MC_THREADS" -m 256 -u nobody 2>&1 &
+    fi
     MC_PID=$!
-    # wait until port is open (up to 5s)
-    local i
     for i in $(seq 1 10); do
         sleep 0.5
         if ss -tnlp 2>/dev/null | grep -q ":$PORT"; then
-            echo "[mc] PID=$MC_PID  PAUSE_COUNT=$pause_count  (port $PORT ready)"
+            echo "[mc] PID=$MC_PID  bin=$(basename "$bin")  pause_count=$pause_count"
             return 0
         fi
     done
-    echo "[ERROR] memcached did not start on port $PORT" >&2
-    return 1
+    echo "[ERROR] memcached did not start on port $PORT" >&2; return 1
 }
 
-run_warmup() {
-    "$MUTILATE_BIN" \
-        -s "127.0.0.1:$PORT" \
-        -r "$RECORDS" \
-        -u "$UPDATE_RATIO" \
-        -T "$MUT_THREADS" \
-        -c "$MUT_CONNS" \
-        -t "$WARMUP_SEC" \
-        > /dev/null 2>&1 || true
-}
+extract_qps()   { grep -E "^Total QPS" "$1" | awk '{print $4}'; }
+extract_r_avg() { grep -E "^read"   "$1" | awk '{print $2}'; }
+extract_r_p99() { grep -E "^read"   "$1" | awk '{print $9}'; }
+extract_w_avg() { grep -E "^update" "$1" | awk '{print $2}'; }
+extract_w_p99() { grep -E "^update" "$1" | awk '{print $9}'; }
 
-run_measure() {
-    local logfile=$1
-    "$MUTILATE_BIN" \
-        -s "127.0.0.1:$PORT" \
-        -r "$RECORDS" \
-        -u "$UPDATE_RATIO" \
-        -T "$MUT_THREADS" \
-        -c "$MUT_CONNS" \
-        -t "$DURATION" \
-        2>&1 | tee "$logfile"
-}
-
-extract_qps() {
-    grep -E "^Total QPS" "$1" | awk '{print $4}'
-}
-extract_avg_us() {
-    grep -E "^read" "$1" | awk '{print $2}'
-}
-extract_p99_us() {
-    grep -E "^read" "$1" | awk '{print $8}'
-}
-
-# awk-based statistics (mean, median, stddev, min, max, CV)
 compute_stats() {
-    # args: space-separated QPS values
     echo "$@" | tr ' ' '\n' | awk '
-    {
-        vals[NR] = $1
-        sum += $1
-        if (NR == 1 || $1 < mn) mn = $1
-        if (NR == 1 || $1 > mx) mx = $1
-    }
+    NF { vals[++n]=$1; sum+=$1 }
     END {
-        n = NR
-        mean = sum / n
-        # stddev
-        for (i = 1; i <= n; i++) sq += (vals[i] - mean)^2
-        sd = (n > 1) ? sqrt(sq / (n-1)) : 0
-        # median (sort by insertion)
-        for (i = 2; i <= n; i++) {
-            key = vals[i]; j = i - 1
-            while (j >= 1 && vals[j] > key) { vals[j+1] = vals[j]; j-- }
-            vals[j+1] = key
-        }
-        med = (n % 2 == 1) ? vals[(n+1)/2] : (vals[n/2] + vals[n/2+1]) / 2
-        cv = (mean > 0) ? sd / mean * 100 : 0
-        printf "%.1f %.1f %.1f %.1f %.1f %.2f", mean, med, sd, mn, mx, cv
+        if (n==0) { print "0 0 0 0"; exit }
+        mean=sum/n
+        for(i=1;i<=n;i++) sq+=(vals[i]-mean)^2
+        sd=(n>1)?sqrt(sq/(n-1)):0
+        for(i=2;i<=n;i++){key=vals[i];j=i-1;while(j>=1&&vals[j]>key){vals[j+1]=vals[j];j--};vals[j+1]=key}
+        med=(n%2==1)?vals[(n+1)/2]:(vals[n/2]+vals[n/2+1])/2
+        cv=(mean>0)?sd/mean*100:0
+        printf "%.1f %.1f %.1f %.2f",mean,med,sd,cv
     }'
 }
 
-echo "============================================================"
-echo " memcached PAUSE sweep experiment"
-echo "============================================================"
-echo " binary     : $MEMCACHED_BIN"
-echo " mutilate   : $MUTILATE_BIN"
-echo " mc_threads : $MC_THREADS  ($(nproc) physical cores)"
-echo " mut_threads: $MUT_THREADS  connections: $MUT_CONNS"
-echo " records    : $RECORDS  update_ratio: $UPDATE_RATIO"
-echo " warmup     : ${WARMUP_SEC}s  measure: ${DURATION}s  runs: $RUNS"
-echo " PAUSE list : $PAUSE_VALUES"
-echo " results    : $RESULT_DIR"
-echo "============================================================"
+run_one_config() {
+    local label=$1 bin=$2 pause_count=$3
 
-for pause_count in $PAUSE_VALUES; do
     echo ""
-    echo ">>> PAUSE_COUNT=$pause_count"
+    echo "=============================="
+    echo " $label  (pause_count=$pause_count)"
+    echo "=============================="
 
-    start_memcached "$pause_count"
+    start_memcached "$bin" "$pause_count"
 
     echo "    warmup ${WARMUP_SEC}s ..."
-    run_warmup
+    taskset -c "$WL_CPUS" "$MUTILATE_BIN" \
+        -s "127.0.0.1:$PORT" -r "$RECORDS" -u "$UPDATE_RATIO" \
+        -T "$MUT_THREADS" -c "$MUT_CONNS" -d "$DEPTH" -t "$WARMUP_SEC" \
+        > /dev/null 2>&1 || true
 
-    qps_list=""
-    last_avg=""
-    last_p99=""
+    local qps_list=""
 
     for run_idx in $(seq 1 "$RUNS"); do
-        logfile="$RESULT_DIR/run_${pause_count}_${run_idx}.log"
-        run_measure "$logfile" > /dev/null
-        qps=$(extract_qps "$logfile")
-        last_avg=$(extract_avg_us "$logfile")
-        last_p99=$(extract_p99_us "$logfile")
-        printf "    run %d/%d: QPS=%.1f  avg=%sus  p99=%sus\n" \
-            "$run_idx" "$RUNS" "$qps" "$last_avg" "$last_p99"
+        local logfile="$RESULT_DIR/raw/run_${label}_${run_idx}.log"
+        taskset -c "$WL_CPUS" "$MUTILATE_BIN" \
+            -s "127.0.0.1:$PORT" -r "$RECORDS" -u "$UPDATE_RATIO" \
+            -T "$MUT_THREADS" -c "$MUT_CONNS" -d "$DEPTH" -t "$DURATION" \
+            > "$logfile" 2>&1
+
+        local qps r_avg r_p99 w_avg w_p99
+        qps=$(extract_qps   "$logfile")
+        r_avg=$(extract_r_avg "$logfile")
+        r_p99=$(extract_r_p99 "$logfile")
+        w_avg=$(extract_w_avg "$logfile")
+        w_p99=$(extract_w_p99 "$logfile")
+
+        printf "    run %d/%d: QPS=%.0f  r_avg=%s r_p99=%s\n" \
+            "$run_idx" "$RUNS" "$qps" "$r_avg" "$r_p99"
+
         qps_list="$qps_list $qps"
-        echo "$pause_count,$run_idx,$qps" >> "$RESULT_DIR/raw.csv"
+
+        echo "${label},${pause_count},${run_idx},${qps},${r_avg},${r_p99},${w_avg},${w_p99}" \
+            >> "$RESULT_DIR/raw.csv"
     done
 
-    read mean_qps median_qps stddev_qps min_qps max_qps cv_pct \
-        <<< "$(compute_stats $qps_list)"
+    local mean_qps med_qps sd_qps cv_qps
+    read mean_qps med_qps sd_qps cv_qps <<< "$(compute_stats $qps_list)"
+    printf "    STATS: QPS_mean=%.0f  median=%.0f  sd=%.0f  cv=%.2f%%\n" \
+        "$mean_qps" "$med_qps" "$sd_qps" "$cv_qps"
 
-    printf "    STATS: mean=%.1f  median=%.1f  sd=%.1f  cv=%.2f%%  [%.1f - %.1f]\n" \
-        "$mean_qps" "$median_qps" "$stddev_qps" "$cv_pct" "$min_qps" "$max_qps"
-
-    echo "| $pause_count | $mean_qps | $median_qps | $stddev_qps | $cv_pct | $last_avg | $last_p99 | $RUNS |" \
+    echo "| $label | $pause_count | $mean_qps | $med_qps | $sd_qps | $cv_qps | $RUNS |" \
         >> "$RESULT_DIR/summary.md"
 
-    cleanup
-    sleep 1
+    cleanup; sleep 1
+}
+
+echo "============================================================"
+echo " memcached pause-spinlock sweep (with master baseline)"
+echo "============================================================"
+echo " spinlock_bin : $MEMCACHED_BIN"
+echo " master_bin   : $MEMCACHED_MASTER_BIN"
+echo " mc_threads   : $MC_THREADS  cpus: $MC_CPUS"
+echo " mut          : -T $MUT_THREADS -c $MUT_CONNS -d $DEPTH -r $RECORDS -u $UPDATE_RATIO"
+echo " warmup       : ${WARMUP_SEC}s  measure: ${DURATION}s  runs: $RUNS"
+echo " N values     : $PAUSE_COUNT_VALUES"
+echo " est_time     : ~${est_min} min"
+echo " results      : $RESULT_DIR"
+echo "============================================================"
+
+# --- master baseline ---
+if [ -x "$MEMCACHED_MASTER_BIN" ]; then
+    run_one_config "master" "$MEMCACHED_MASTER_BIN" "master"
+else
+    echo "[WARN] master binary not found: $MEMCACHED_MASTER_BIN  skipping baseline"
+fi
+
+# --- pause_count sweep ---
+for pc in $PAUSE_COUNT_VALUES; do
+    run_one_config "N${pc}" "$MEMCACHED_BIN" "$pc"
 done
 
 echo ""
 echo "============================================================"
 echo " FINAL SUMMARY"
 echo "============================================================"
-printf "%-12s %-12s %-12s %-10s %-8s\n" \
-    "PAUSE_COUNT" "mean_QPS" "median_QPS" "stddev" "CV%"
-echo "------------------------------------------------------------"
-
-grep "^| [0-9]" "$RESULT_DIR/summary.md" | awk -F'|' '{
-    gsub(/ /,"",$2); gsub(/ /,"",$3); gsub(/ /,"",$5); gsub(/ /,"",$6)
-    printf "%-12s %-12s %-12s %-10s %-8s\n", $2, $3, $4, $5, $6
-}'
-
+cat "$RESULT_DIR/summary.md"
 echo ""
-echo "Full data: $RESULT_DIR/summary.md"
-echo "Raw runs : $RESULT_DIR/raw.csv"
+echo "Results: $RESULT_DIR"
