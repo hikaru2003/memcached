@@ -31,17 +31,37 @@ typedef struct {
 
 extern int global_pause_count;
 
+/*
+ * Per-worker-thread pointer. Set to LIBEVENT_THREAD* by worker_libevent();
+ * NULL in non-worker threads. Typed void* to avoid forward-decl issues.
+ */
+extern __thread void *tl_me;
+/* rdtsc value recorded at lock acquisition; used by spinlock_unlock. */
+extern __thread uint64_t tl_lock_start;
+
+static inline uint64_t _rdtsc(void) {
+    uint32_t lo, hi;
+    asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+/* Accumulates hold time delta into the thread struct; defined in thread.c. */
+void spinlock_note_hold_end(uint64_t start);
+
 static inline void spinlock_init(spinlock_t *sl) {
     pthread_mutex_init(&sl->mutex, NULL);
 }
 
 static inline void spinlock_lock(spinlock_t *sl) {
     for (int i = 0; i < global_pause_count; i++) {
-        if (pthread_mutex_trylock(&sl->mutex) == 0)
+        if (pthread_mutex_trylock(&sl->mutex) == 0) {
+            if (tl_me) tl_lock_start = _rdtsc();
             return;
+        }
         cpu_relax();
     }
     pthread_mutex_lock(&sl->mutex);
+    if (tl_me) tl_lock_start = _rdtsc();
 }
 
 static inline int spinlock_trylock(spinlock_t *sl) {
@@ -49,6 +69,7 @@ static inline int spinlock_trylock(spinlock_t *sl) {
 }
 
 static inline void spinlock_unlock(spinlock_t *sl) {
+    if (tl_me) spinlock_note_hold_end(tl_lock_start);
     pthread_mutex_unlock(&sl->mutex);
 }
 #include <assert.h>
@@ -777,6 +798,8 @@ typedef struct {
     char   *ssl_wbuf;
 #endif
     int napi_id;                /* napi id associated with this thread */
+    uint64_t hold_total_cycles; /* spinlock hold time accumulator (debug/hold-time) */
+    uint64_t hold_lock_count;   /* number of acquisitions measured */
 #ifdef PROXY
     void *proxy_ctx; // proxy global context
     void *L; // lua VM

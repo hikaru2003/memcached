@@ -4263,6 +4263,25 @@ static void sig_usrhandler(const int sig) {
     stop_main_loop = GRACE_STOP;
 }
 
+/* SIGUSR2: print per-thread spinlock hold-time stats, then reset.
+ * Format: "SPINLOCK_HOLD_CYCLES: <total_cycles> <lock_count> <avg_cycles>"
+ * avg_cycles / TSC_MHz = avg hold time in microseconds. */
+static void sig_usr2handler(const int sig) {
+    uint64_t total_cycles = 0, total_count = 0;
+    int n = settings.num_threads;
+    for (int i = 0; i < n; i++) {
+        LIBEVENT_THREAD *t = get_worker_thread(i);
+        total_cycles += t->hold_total_cycles;
+        total_count  += t->hold_lock_count;
+        t->hold_total_cycles = 0;
+        t->hold_lock_count   = 0;
+    }
+    uint64_t avg = total_count > 0 ? total_cycles / total_count : 0;
+    fprintf(stderr, "SPINLOCK_HOLD_CYCLES: %" PRIu64 " %" PRIu64 " %" PRIu64 "\n",
+            total_cycles, total_count, avg);
+    fflush(stderr);
+}
+
 /*
  * On systems that supports multiple page sizes we may reduce the
  * number of TLB-misses by using the biggest available page size
@@ -4864,6 +4883,7 @@ int main (int argc, char **argv) {
     signal(SIGTERM, sig_handler);
     signal(SIGHUP, sighup_handler);
     signal(SIGUSR1, sig_usrhandler);
+    signal(SIGUSR2, sig_usr2handler);
 
     /* init settings */
     settings_init();

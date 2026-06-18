@@ -23,6 +23,18 @@
 /* global_pause_count is declared extern in memcached.h; defined here */
 int global_pause_count = 0;
 
+/* Per-worker-thread pointer; NULL in non-worker threads. */
+__thread void *tl_me = NULL;
+/* rdtsc value at lock acquisition; consumed by spinlock_note_hold_end(). */
+__thread uint64_t tl_lock_start = 0;
+
+void spinlock_note_hold_end(uint64_t start) {
+    uint64_t delta = _rdtsc() - start;
+    LIBEVENT_THREAD *t = (LIBEVENT_THREAD *)tl_me;
+    t->hold_total_cycles += delta;
+    t->hold_lock_count++;
+}
+
 #include "queue.h"
 #include "tls.h"
 
@@ -511,6 +523,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
  */
 static void *worker_libevent(void *arg) {
     LIBEVENT_THREAD *me = arg;
+    tl_me = me; /* enable per-thread hold-time tracking in spinlock_note_hold_end() */
 
     /* Any per-thread setup can happen here; memcached_thread_init() will block until
      * all threads have finished initializing.
