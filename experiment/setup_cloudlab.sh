@@ -175,7 +175,7 @@ echo "  Sockets    : $sockets"
 echo "  Phys cores : $total_physical  (${cores_per_socket}/socket)"
 echo "  HT threads : $threads_per_core per core  (${total_logical} logical total)"
 
-# アーキテクチャ判定 + 推奨 PAUSE_PER_ROUND_VALUES
+# アーキテクチャ判定
 # PAUSE実測値（simple_mysql実験 result/2026_6_3/README.md より）:
 #   Ivy Bridge≈15cyc, Broadwell≈12cyc, Skylake≈142cyc, IceLake≈39cyc, Emerald≈37cyc
 # CloudLab hardware type → CPU model の対応:
@@ -184,31 +184,31 @@ echo "  HT threads : $threads_per_core per core  (${total_logical} logical total
 #   c6620(Emerald): Xeon Gold 6554S
 if echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v4|E7-.*v4|broadwell"; then
     ARCH_NAME="broadwell"
-    PAUSE_REC="0 1 2 5 10 20 50 100 200"
-    PAUSE_NOTE="Broadwell(xl170): PAUSE≈12cyc"
+    PAUSE_NOTE="Broadwell(xl170): PAUSE~12cyc"
 elif echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v2|E7-.*v2|E3-.*v2"; then
     ARCH_NAME="ivybridge"
-    PAUSE_REC="0 1 2 5 10 20 50 100 200"
-    PAUSE_NOTE="Ivy Bridge(c8220): PAUSE≈15cyc"
+    PAUSE_NOTE="Ivy Bridge(c8220): PAUSE~15cyc"
 elif echo "$cpu_model" | grep -qiE "6554|6548|6538|emerald"; then
     ARCH_NAME="emeraldrapids"
-    PAUSE_REC="0 1 2 5 10 20 30 50 80 100"
-    PAUSE_NOTE="Emerald Rapids(c6620): PAUSE≈37cyc"
+    PAUSE_NOTE="Emerald Rapids(c6620): PAUSE~37cyc"
 elif echo "$cpu_model" | grep -qiE "6338|6348|6354|ice lake|icelake"; then
     ARCH_NAME="icelake"
-    PAUSE_REC="0 1 2 5 10 20 30 50 80 100"
-    PAUSE_NOTE="Ice Lake(sm110): PAUSE≈39cyc"
+    PAUSE_NOTE="Ice Lake(sm110): PAUSE~39cyc"
 elif echo "$cpu_model" | grep -qiE "Silver 4114|Silver 41[0-9]{2}|Gold 5[12][0-9]{2}|skylake"; then
     ARCH_NAME="skylake"
-    PAUSE_REC="0 1 2 3 5 8 10 15 20 30"
-    PAUSE_NOTE="Skylake(c220g5): PAUSE≈142cyc"
+    PAUSE_NOTE="Skylake(c220g5): PAUSE~142cyc"
 else
     ARCH_NAME="unknown"
-    PAUSE_REC="0 1 2 5 10 20 30 50 100"
-    PAUSE_NOTE="Unknown arch — PAUSE cycles unknown, verify manually"
+    PAUSE_NOTE="Unknown arch -- PAUSE cycles unknown, verify manually"
 fi
 
+# 全アーキ共通のスイープ値（グラフ比較のため統一）
+# SPIN_ROUNDS=30固定なので total_pause_budget = N * 30
+# Skylake(142cyc)でN=200 → 852K cycles、Ivy(15cyc)でN=200 → 90K cycles
+PAUSE_REC="0 1 2 3 5 8 10 15 20 30 50 80 100 150 200"
+
 echo "  Arch guess : $ARCH_NAME  ($PAUSE_NOTE)"
+echo "  PAUSE sweep: $PAUSE_REC  (unified across all arch for graph comparison)"
 
 # MC(4スレッド) + mutilate(4スレッド) = 8物理コア必要
 # 物理コアを前半/後半に割り当て（HT兄弟は使わない）
