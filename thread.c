@@ -27,6 +27,17 @@
 
 #define ITEMS_PER_ALLOC 64
 
+/* Per-worker-thread pointer; NULL in non-worker threads. */
+static __thread void *tl_me = NULL;
+/* rdtsc value at lock acquisition. */
+static __thread uint64_t tl_lock_start = 0;
+
+static inline uint64_t _rdtsc(void) {
+    uint32_t lo, hi;
+    asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
 /* An item in the connection queue. */
 enum conn_queue_item_modes {
     queue_new_conn,   /* brand new connection. */
@@ -116,21 +127,35 @@ static void thread_libevent_ionotify(evutil_socket_t fd, short which, void *arg)
 
 void item_lock(uint32_t hv) {
     mutex_lock(&item_locks[hv & hashmask(item_lock_hashpower)]);
+    if (tl_me) tl_lock_start = _rdtsc();
 }
 
 void *item_trylock(uint32_t hv) {
     pthread_mutex_t *lock = &item_locks[hv & hashmask(item_lock_hashpower)];
     if (pthread_mutex_trylock(lock) == 0) {
+        if (tl_me) tl_lock_start = _rdtsc();
         return lock;
     }
     return NULL;
 }
 
 void item_trylock_unlock(void *lock) {
+    if (tl_me) {
+        uint64_t delta = _rdtsc() - tl_lock_start;
+        LIBEVENT_THREAD *t = (LIBEVENT_THREAD *)tl_me;
+        t->hold_total_cycles += delta;
+        t->hold_lock_count++;
+    }
     mutex_unlock((pthread_mutex_t *) lock);
 }
 
 void item_unlock(uint32_t hv) {
+    if (tl_me) {
+        uint64_t delta = _rdtsc() - tl_lock_start;
+        LIBEVENT_THREAD *t = (LIBEVENT_THREAD *)tl_me;
+        t->hold_total_cycles += delta;
+        t->hold_lock_count++;
+    }
     mutex_unlock(&item_locks[hv & hashmask(item_lock_hashpower)]);
 }
 
@@ -506,6 +531,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
  */
 static void *worker_libevent(void *arg) {
     LIBEVENT_THREAD *me = arg;
+    tl_me = me; /* enable per-thread hold-time tracking */
 
     /* Any per-thread setup can happen here; memcached_thread_init() will block until
      * all threads have finished initializing.

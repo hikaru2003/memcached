@@ -743,6 +743,8 @@ typedef struct {
     char   *ssl_wbuf;
 #endif
     int napi_id;                /* napi id associated with this thread */
+    uint64_t hold_total_cycles; /* item_lock hold time accumulator (debug/hold-time-master) */
+    uint64_t hold_lock_count;   /* number of acquisitions measured */
 #ifdef PROXY
     void *proxy_ctx; // proxy global context
     void *L; // lua VM
