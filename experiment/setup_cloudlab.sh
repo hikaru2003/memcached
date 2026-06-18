@@ -53,6 +53,7 @@ echo "============================================================"
 if [ -z "$SKIP_PKG" ]; then
     echo ""
     echo "[1/4] Installing OS packages ..."
+    # Ubuntu 24.04 (CloudLab default, verified on all 5 arch nodes)
     if command -v apt-get &>/dev/null; then
         sudo apt-get update -qq
         sudo apt-get install -y \
@@ -165,30 +166,36 @@ echo "  Phys cores : $total_physical  (${cores_per_socket}/socket)"
 echo "  HT threads : $threads_per_core per core  (${total_logical} logical total)"
 
 # アーキテクチャ判定 + 推奨 PAUSE_PER_ROUND_VALUES
-if echo "$cpu_model" | grep -qiE "broadwell|E5.*v4|E7.*v4|D-15[0-9][0-9]"; then
+# PAUSE実測値（simple_mysql実験 result/2026_6_3/README.md より）:
+#   Ivy Bridge≈15cyc, Broadwell≈12cyc, Skylake≈142cyc, IceLake≈39cyc, Emerald≈37cyc
+# CloudLab hardware type → CPU model の対応:
+#   c8220(Ivy): Xeon E5-2650 v2  /  xl170(Broadwell): Xeon E5-2640 v4
+#   c220g5(Skylake): Xeon Silver 4114  /  sm110(IceLake): Xeon Gold 6338
+#   c6620(Emerald): Xeon Gold 6554S
+if echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v4|E7-.*v4|broadwell"; then
     ARCH_NAME="broadwell"
-    PAUSE_REC="0 1 2 5 10 20 30 50 80 100"
-    PAUSE_NOTE="Broadwell: PAUSE≈10 cycles, wider sweep"
-elif echo "$cpu_model" | grep -qiE "ivy|E5.*v2|E7.*v2|E3.*v2|i[357]-[34][0-9]{3}"; then
+    PAUSE_REC="0 1 2 5 10 20 50 100 200"
+    PAUSE_NOTE="Broadwell(xl170): PAUSE≈12cyc"
+elif echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v2|E7-.*v2|E3-.*v2"; then
     ARCH_NAME="ivybridge"
-    PAUSE_REC="0 1 2 5 10 20 30 50 80 100"
-    PAUSE_NOTE="Ivy Bridge: PAUSE≈10 cycles, wider sweep"
-elif echo "$cpu_model" | grep -qiE "emerald|6[0-9]{3}[NPHC]|8[5-9][0-9]{2}[A-Z]"; then
+    PAUSE_REC="0 1 2 5 10 20 50 100 200"
+    PAUSE_NOTE="Ivy Bridge(c8220): PAUSE≈15cyc"
+elif echo "$cpu_model" | grep -qiE "6554|6548|6538|emerald"; then
     ARCH_NAME="emeraldrapids"
-    PAUSE_REC="0 1 2 3 5 8 10 15 20"
-    PAUSE_NOTE="Emerald Rapids: PAUSE≈140 cycles, narrower sweep"
-elif echo "$cpu_model" | grep -qiE "ice lake|8[23][0-9]{2}[A-Z]|icelake"; then
+    PAUSE_REC="0 1 2 5 10 20 30 50 80 100"
+    PAUSE_NOTE="Emerald Rapids(c6620): PAUSE≈37cyc"
+elif echo "$cpu_model" | grep -qiE "6338|6348|6354|ice lake|icelake"; then
     ARCH_NAME="icelake"
-    PAUSE_REC="0 1 2 3 5 8 10 15 20"
-    PAUSE_NOTE="Ice Lake: PAUSE≈140 cycles, narrower sweep"
-elif echo "$cpu_model" | grep -qiE "skylake|silver 4[01][0-9]{2}|gold 5[12][0-9]{2}|gold 6[12][0-9]{2}|platinum 8[12][0-9]{2}"; then
+    PAUSE_REC="0 1 2 5 10 20 30 50 80 100"
+    PAUSE_NOTE="Ice Lake(sm110): PAUSE≈39cyc"
+elif echo "$cpu_model" | grep -qiE "Silver 4114|Silver 41[0-9]{2}|Gold 5[12][0-9]{2}|skylake"; then
     ARCH_NAME="skylake"
-    PAUSE_REC="0 1 2 3 5 8 10 15 20"
-    PAUSE_NOTE="Skylake: PAUSE≈140 cycles, narrower sweep"
+    PAUSE_REC="0 1 2 3 5 8 10 15 20 30"
+    PAUSE_NOTE="Skylake(c220g5): PAUSE≈142cyc"
 else
     ARCH_NAME="unknown"
-    PAUSE_REC="0 1 2 3 5 10 20 30 50"
-    PAUSE_NOTE="Unknown arch — verify manually"
+    PAUSE_REC="0 1 2 5 10 20 30 50 100"
+    PAUSE_NOTE="Unknown arch — PAUSE cycles unknown, verify manually"
 fi
 
 echo "  Arch guess : $ARCH_NAME  ($PAUSE_NOTE)"
