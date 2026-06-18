@@ -62,11 +62,18 @@ echo " remote     : $REMOTE"
 echo " branch     : $BRANCH"
 echo "============================================================"
 
-# リモートが設定されているか確認
+# リモートが設定されているか確認（setup_cloudlab.sh で自動設定済みのはず）
 if ! git remote | grep -q "^${REMOTE}$"; then
     echo "[ERROR] Remote '$REMOTE' not configured." >&2
-    echo "  Run: git remote add myfork git@github.com:hikaru2003/memcached.git" >&2
+    echo "  setup_cloudlab.sh を実行したか確認してください。" >&2
+    echo "  または: git remote add myfork git@github.com:hikaru2003/memcached.git" >&2
     exit 1
+fi
+
+# ssh -A (agent forwarding) の確認
+if ! ssh -o BatchMode=yes -o ConnectTimeout=5 git@github.com 2>&1 | grep -q "hikaru2003"; then
+    echo "[WARN] GitHub SSH 接続が確認できません。" >&2
+    echo "  ssh -A でログインしているか確認してください（agent forwarding 必須）。" >&2
 fi
 
 # 現在のブランチを記録
