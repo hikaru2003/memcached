@@ -1,5 +1,5 @@
 """
-memcached utdelay pause_per_round sweep — cross-architecture experiment profile
+memcached utdelay pause_per_round sweep - cross-architecture experiment profile
 
 Single bare-metal node for measuring PAUSE latency characteristics per CPU
 microarchitecture (Ivy Bridge, Broadwell, Skylake, Ice Lake, Emerald Rapids).
@@ -25,7 +25,7 @@ pc = portal.Context()
 request = pc.makeRequestRSpec()
 
 # ---------------------------------------------------------------------------
-# Architecture → hardware type mapping
+# Architecture -> hardware type mapping
 # Verified from simple_mysql experiment results on CloudLab.
 # PAUSE cycles/instr measured values (from result/2026_6_3/README.md):
 #   ivy_c8220:     14.56 cyc   broadwell_xl170: 12.34 cyc
@@ -33,14 +33,14 @@ request = pc.makeRequestRSpec()
 #   emerald_c6620:  37.15 cyc
 # ---------------------------------------------------------------------------
 arch_options = [
-    ("skylake",        "Skylake       (c220g5 / Xeon Silver 4114,  PAUSE≈142cyc)"),
-    ("broadwell",      "Broadwell     (xl170  / Xeon E5-2640 v4,   PAUSE≈12cyc)"),
-    ("ivybridge",      "Ivy Bridge    (c8220  / Xeon E5-2650 v2,   PAUSE≈15cyc)"),
-    ("icelake",        "Ice Lake      (sm110  / Xeon Gold 6338,    PAUSE≈39cyc)"),
-    ("emeraldrapids",  "Emerald Rapids(c6620  / Xeon Gold 6554S,   PAUSE≈37cyc)"),
+    ("skylake",        "Skylake       (c220g5 / Xeon Silver 4114,  PAUSE~142cyc)"),
+    ("broadwell",      "Broadwell     (xl170  / Xeon E5-2640 v4,   PAUSE~12cyc)"),
+    ("ivybridge",      "Ivy Bridge    (c8220  / Xeon E5-2650 v2,   PAUSE~15cyc)"),
+    ("icelake",        "Ice Lake      (sm110  / Xeon Gold 6338,    PAUSE~39cyc)"),
+    ("emeraldrapids",  "Emerald Rapids(c6620  / Xeon Gold 6554S,   PAUSE~37cyc)"),
 ]
 
-# Hardware type strings — verified against simple_mysql result directory names
+# Hardware type strings - verified against simple_mysql result directory names
 HW_MAP = {
     "skylake":        "c220g5",
     "broadwell":      "xl170",
