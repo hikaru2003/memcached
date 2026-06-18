@@ -47,6 +47,9 @@ static inline void spinlock_init(spinlock_t *sl) {
 }
 
 static inline void spinlock_lock(spinlock_t *sl) {
+    /* initial trylock: ensures pause=0 only counts genuine contention */
+    if (pthread_mutex_trylock(&sl->mutex) == 0)
+        return;
     for (int i = 0; i < global_pause_count; i++) {
         if (pthread_mutex_trylock(&sl->mutex) == 0)
             return;
