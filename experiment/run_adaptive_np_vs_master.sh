@@ -57,12 +57,12 @@ RECORDS=1
 
 RUN_DATE=$(date '+%Y-%m-%d %H:%M:%S')
 _RATIOS=$(echo "$UPDATE_RATIO_VALUES" | wc -w | tr -d ' ')
-_BASE="experiment/results/adaptive_np_vs_master_t${MC_THREADS}_T${MUT_THREADS}c${MUT_CONNS}_r${RECORDS}_${_RATIOS}ratios"
+_BASE="experiment/results/adaptive_np_vs_master_mc${MC_THREADS}_mut${MUT_THREADS}c${MUT_CONNS}_r${RECORDS}_${_RATIOS}ratios"
 RESULT_DIR="$_BASE"
 _i=2; while [ -d "$RESULT_DIR" ]; do RESULT_DIR="${_BASE}_run${_i}"; _i=$((_i+1)); done
 ADAPTIVE_DIR="$RESULT_DIR/adaptive_np"
 MASTER_DIR="$RESULT_DIR/master"
-mkdir -p "$ADAPTIVE_DIR" "$MASTER_DIR"
+mkdir -p "$ADAPTIVE_DIR/raw" "$MASTER_DIR/raw"
 {
     echo "# Run info"
     echo "- date: ${RUN_DATE}"
@@ -162,7 +162,7 @@ measure_binary() {
         qps_list="" r_avg_list="" r_p99_list="" w_avg_list="" w_p99_list=""
 
         for run_idx in $(seq 1 "$RUNS"); do
-            logfile="$outdir/run_${ratio_name}_${run_idx}.log"
+            logfile="$outdir/raw/run_${ratio_name}_${run_idx}.log"
             run_measure "$logfile" "$update_ratio" > /dev/null
             qps=$(extract_qps "$logfile")
             r_avg=$(extract_avg_us   "$logfile")

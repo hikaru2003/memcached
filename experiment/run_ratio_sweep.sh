@@ -52,7 +52,7 @@ UPDATE_RATIO_VALUES="${UPDATE_RATIO_VALUES:-0.0 0.1 0.3 0.5 0.7 0.9 1.0}"
 RECORDS=1
 
 RUN_DATE=$(date '+%Y-%m-%d %H:%M:%S')
-_BASE="experiment/results/pause_spinlock_ratio_sweep_t${MC_THREADS}_T${MUT_THREADS}c${MUT_CONNS}_r${RECORDS}"
+_BASE="experiment/results/pause_spinlock_ratio_sweep_mc${MC_THREADS}_mut${MUT_THREADS}c${MUT_CONNS}_r${RECORDS}"
 RESULT_DIR="$_BASE"
 _i=2; while [ -d "$RESULT_DIR" ]; do RESULT_DIR="${_BASE}_run${_i}"; _i=$((_i+1)); done
 mkdir -p "$RESULT_DIR"
@@ -167,7 +167,7 @@ for update_ratio in $UPDATE_RATIO_VALUES; do
     get_pct=$((100 - set_pct))
     subdir_name="get${get_pct}_set${set_pct}"
     subdir="$RESULT_DIR/$subdir_name"
-    mkdir -p "$subdir"
+    mkdir -p "$subdir/raw"
 
     echo ""
     echo "============================================================"
@@ -210,7 +210,7 @@ EOF
         w_avg_list="" w_p99_list=""
 
         for run_idx in $(seq 1 "$RUNS"); do
-            logfile="$subdir/run_P${pause_count}_${run_idx}.log"
+            logfile="$subdir/raw/run_P${pause_count}_${run_idx}.log"
             run_measure "$logfile" "$update_ratio" > /dev/null
             qps=$(extract_qps "$logfile")
             r_avg=$(extract_avg_us   "$logfile")

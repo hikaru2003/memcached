@@ -62,7 +62,7 @@ _BASE="experiment/results/ycsb_var_pause_sweep_t${MC_THREADS}_yt${YCSB_THREADS}"
 RESULT_DIR="$_BASE"
 _i=2; while [ -d "$RESULT_DIR" ]; do RESULT_DIR="${_BASE}_run${_i}"; _i=$((_i+1)); done
 BASELINE_DIR="$RESULT_DIR/master_baseline"
-mkdir -p "$RESULT_DIR" "$BASELINE_DIR"
+mkdir -p "$RESULT_DIR/raw" "$BASELINE_DIR/raw"
 {
     echo "# Run info"
     echo "- date: ${RUN_DATE}"
@@ -164,13 +164,13 @@ echo "============================================================"
 echo ""; echo "===== master baseline ====="
 start_memcached "$MASTER_BIN" ""
 echo "    load phase (inserting ${recordcount:-100000} keys) ..."
-load_ycsb "$BASELINE_DIR/load.log"
+load_ycsb "$BASELINE_DIR/raw/load.log"
 echo "    warmup ${WARMUP_SEC}s ..."
-run_ycsb "$BASELINE_DIR/warmup.log" "$WARMUP_SEC"
+run_ycsb "$BASELINE_DIR/raw/warmup.log" "$WARMUP_SEC"
 
 ops_list="" r_avg_list="" r_p99_list="" u_avg_list="" u_p99_list=""
 for run_idx in $(seq 1 "$RUNS"); do
-    logfile="$BASELINE_DIR/run_${run_idx}.log"
+    logfile="$BASELINE_DIR/raw/run_${run_idx}.log"
     run_ycsb "$logfile" "$DURATION"
     ops=$(extract_ops "$logfile")
     r_avg=$(extract_read_avg   "$logfile")
@@ -216,13 +216,13 @@ for pause_count in $PAUSE_VALUES; do
     echo ""; echo ">>> PAUSE_COUNT=$pause_count"
     start_memcached "$MEMCACHED_BIN" "$pause_count"
     echo "    load phase ..."
-    load_ycsb "$RESULT_DIR/load_P${pause_count}.log"
+    load_ycsb "$RESULT_DIR/raw/load_P${pause_count}.log"
     echo "    warmup ${WARMUP_SEC}s ..."
-    run_ycsb "$RESULT_DIR/warmup_P${pause_count}.log" "$WARMUP_SEC"
+    run_ycsb "$RESULT_DIR/raw/warmup_P${pause_count}.log" "$WARMUP_SEC"
 
     ops_list="" r_avg_list="" r_p99_list="" u_avg_list="" u_p99_list=""
     for run_idx in $(seq 1 "$RUNS"); do
-        logfile="$RESULT_DIR/run_P${pause_count}_${run_idx}.log"
+        logfile="$RESULT_DIR/raw/run_P${pause_count}_${run_idx}.log"
         run_ycsb "$logfile" "$DURATION"
         ops=$(extract_ops "$logfile")
         r_avg=$(extract_read_avg   "$logfile")

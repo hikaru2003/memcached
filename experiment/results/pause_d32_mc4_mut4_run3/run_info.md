@@ -1,0 +1,15 @@
+# Run info
+- date: 2026-06-17 22:07:28
+- commit: 44eaeae
+- branch: experiment/pause-spinlock
+- mc_threads: 4 (cpus: 0-3)
+- mut_threads: 4 (cpus: 4-7)
+- mut_conns: 1 / total_conns: 4
+- depth: 32
+- records: 1
+- update_ratio_sweep: 0.0 1.0
+- warmup: 300s / duration: 60s / runs: 10
+- pause_values: 0 10 20 30 40 50 60 70 80 90 100 200 300
+- master_bin: ./memcached_master
+- spinlock_bin: ./memcached_pause-spinlock
+- est_time: ~420 min

@@ -60,10 +60,10 @@ RECORDS=1
 UPDATE_RATIO=0.5
 
 RUN_DATE=$(date '+%Y-%m-%d %H:%M:%S')
-_BASE="experiment/results/contention_sweep_get50set50_t${MC_THREADS}_T${MUT_THREADS}c${MUT_CONNS}"
+_BASE="experiment/results/contention_sweep_get50set50_mc${MC_THREADS}_mut${MUT_THREADS}c${MUT_CONNS}"
 RESULT_DIR="$_BASE"
 _i=2; while [ -d "$RESULT_DIR" ]; do RESULT_DIR="${_BASE}_run${_i}"; _i=$((_i+1)); done
-mkdir -p "$RESULT_DIR"
+mkdir -p "$RESULT_DIR/raw"
 {
     echo "# Run info"
     echo "- date: ${RUN_DATE}"
@@ -157,8 +157,8 @@ for pause_count in $PAUSE_VALUES; do
     cycles_list="" instr_list=""
 
     for run_idx in $(seq 1 "$RUNS"); do
-        logfile="$RESULT_DIR/run_P${pause_count}_${run_idx}.log"
-        perffile="$RESULT_DIR/perf_P${pause_count}_${run_idx}.txt"
+        logfile="$RESULT_DIR/raw/run_P${pause_count}_${run_idx}.log"
+        perffile="$RESULT_DIR/raw/perf_P${pause_count}_${run_idx}.txt"
 
         # read /proc before
         read vol_before nonvol_before <<< "$(read_proc_status $MC_PID)"

@@ -62,10 +62,10 @@ PAUSE_COUNT="${PAUSE_COUNT:-0}"
 DEPTH="${DEPTH:-8}"
 
 RUN_DATE=$(date '+%Y-%m-%d %H:%M:%S')
-_BASE="experiment/results/saturation_sweep_t${MC_THREADS}_T${MUT_THREADS}_r${RECORDS}"
+_BASE="experiment/results/saturation_mc${MC_THREADS}_mut${MUT_THREADS}_r${RECORDS}"
 RESULT_DIR="$_BASE"
 _i=2; while [ -d "$RESULT_DIR" ]; do RESULT_DIR="${_BASE}_run${_i}"; _i=$((_i+1)); done
-mkdir -p "$RESULT_DIR"
+mkdir -p "$RESULT_DIR/raw"
 {
     echo "# Run info"
     echo "- date: ${RUN_DATE}"
@@ -176,7 +176,7 @@ for mut_conns in $MUT_CONNS_VALUES; do
     qps_list="" r_avg_list="" r_p99_list="" w_avg_list="" w_p99_list=""
 
     for run_idx in $(seq 1 "$RUNS"); do
-        logfile="$RESULT_DIR/run_C${total_conns}_${run_idx}.log"
+        logfile="$RESULT_DIR/raw/run_C${total_conns}_${run_idx}.log"
         run_mutilate "$logfile" "$mut_conns" > /dev/null
         qps=$(extract_qps    "$logfile")
         r_avg=$(extract_avg_us "$logfile")

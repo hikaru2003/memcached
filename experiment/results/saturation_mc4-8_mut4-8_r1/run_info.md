@@ -1,0 +1,12 @@
+# Run info
+- date: 2026-06-16 23:10:13
+- commit: 44eaeae
+- branch: experiment/pause-spinlock
+- binary: ./memcached_master
+- mc_threads_sweep: 4 8
+- mc_cpus_4: 0-3 / mc_cpus_8: 0-3
+- mut_threads_sweep: 4 8 (cpus: 4-7)
+- mut_conns: 1
+- depth_sweep: 1 2 4 6 8 12 16 24 32 48 64 96 128
+- records: 1 / update_ratio: 0.5
+- warmup: 30s / duration: 60s / runs: 5
