@@ -58,6 +58,53 @@ PORT="${PORT:-11222}"
 MC_CPUS="${MC_CPUS:-0-3}"
 WL_CPUS="${WL_CPUS:-4-7}"
 
+check_perf_env() {
+    local errors=0
+
+    local smt_val
+    smt_val=$(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo "N/A")
+    if [ "$smt_val" = "N/A" ]; then
+        echo "[WARN] SMT status unknown (smt/active not found)"
+    elif [ "$smt_val" != "0" ]; then
+        echo "[ERROR] SMT is ON (smt/active=$smt_val)"
+        errors=$(( errors + 1 ))
+    fi
+
+    local gov
+    gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "N/A")
+    if [ "$gov" = "N/A" ]; then
+        echo "[WARN] governor status unknown (scaling_governor not found)"
+    elif [ "$gov" != "performance" ]; then
+        echo "[ERROR] governor=$gov (expected: performance)"
+        errors=$(( errors + 1 ))
+    fi
+
+    if [ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
+        local no_turbo
+        no_turbo=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo)
+        if [ "$no_turbo" != "1" ]; then
+            echo "[ERROR] Turbo Boost is ON (intel_pstate/no_turbo=$no_turbo, expected: 1)"
+            errors=$(( errors + 1 ))
+        fi
+    elif [ -f /sys/devices/system/cpu/cpufreq/boost ]; then
+        local boost_val
+        boost_val=$(cat /sys/devices/system/cpu/cpufreq/boost)
+        if [ "$boost_val" != "0" ]; then
+            echo "[ERROR] Turbo Boost is ON (cpufreq/boost=$boost_val, expected: 0)"
+            errors=$(( errors + 1 ))
+        fi
+    else
+        echo "[WARN] Turbo Boost status unknown (no_turbo / cpufreq/boost not found)"
+    fi
+
+    if [ "$errors" -gt 0 ]; then
+        echo "[ERROR] $errors environment check(s) failed. Fix: sudo bash experiment/setup_perf_env.sh"
+        exit 1
+    fi
+    echo "[OK] CPU env: SMT=off, governor=performance, turbo=off"
+}
+check_perf_env
+
 RUN_DATE=$(date '+%Y%m%d_%H%M%S')
 RESULT_DIR="experiment/results/pause_sweep_${RUN_DATE}"
 mkdir -p "$RESULT_DIR/raw"
