@@ -5,8 +5,10 @@
 # Description:
 #   実験前の CPU 環境統一スクリプト。annサーバの設定を基準として以下を適用する。
 #     1. SMT (Hyper-Threading) を無効化
-#     2. CPU 周波数ガバナーを performance に設定（最大周波数固定）
-#     3. Turbo Boost を無効化
+#     2. intel_pstate を passive モードに切り替え（HWP による周波数自律制御を無効化）
+#        + governor を performance に設定
+#        + scaling_min_freq = scaling_max_freq でベースクロックにピン留め
+#     3. Turbo Boost を無効化（turbo off 後に scaling_max_freq が下がるので再ピン留め）
 #   設定はリブートで元に戻る（永続化しない）。
 #
 # Output:
@@ -42,33 +44,45 @@ else
     echo "  [SKIP] $SMT_CTRL が存在しない（SMT非対応 or すでに無効）"
 fi
 
-# ---- 2. 周波数ガバナー: performance ----
+# ---- 2. 周波数固定: intel_pstate passive + performance governor + min=max ----
 echo ""
-echo "[2/3] CPU frequency governor -> performance ..."
-failed=0
+echo "[2/3] CPU frequency -> fixed at base clock ..."
+
+# intel_pstate active (HWP) モードでは governor 書き込みが HWP に無視される。
+# passive に切り替えることで acpi-cpufreq 相当の完全制御を得る。
+PSTATE_STATUS="/sys/devices/system/cpu/intel_pstate/status"
+if [ -f "$PSTATE_STATUS" ]; then
+    echo passive > "$PSTATE_STATUS"
+    echo "  intel_pstate/status : $(cat $PSTATE_STATUS)  (passive=full governor control)"
+else
+    echo "  [INFO] intel_pstate/status not found (non-intel or already passive)"
+fi
+
+# governor を performance に設定
 for gov_path in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     [ -f "$gov_path" ] || continue
-    echo performance > "$gov_path" || { failed=1; break; }
+    echo performance > "$gov_path"
 done
+gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "N/A")
+echo "  governor     : $gov"
 
-if [ "$failed" = "0" ]; then
-    gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "N/A")
-    cur=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo "N/A")
-    max=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null || echo "N/A")
-    echo "  governor     : $gov"
-    echo "  cur_freq     : ${cur} Hz  ($(( ${cur:-0} / 1000 )) MHz)"
-    echo "  max_freq     : ${max} Hz  ($(( ${max:-0} / 1000 )) MHz)"
-    echo "  [OK]"
-else
-    # cpupower フォールバック
-    if command -v cpupower &>/dev/null; then
-        cpupower frequency-set -g performance 2>&1 | tail -2
-        echo "  (applied via cpupower)"
-    else
-        echo "  [WARN] scaling_governor への書き込み失敗。cpupower もなし。"
-        echo "  手動: echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"
-    fi
-fi
+# scaling_min_freq = scaling_max_freq でクロックをピン留め
+# no_turbo=1 設定後は scaling_max_freq がベースクロックに制限されるため
+# ここでは現時点の scaling_max_freq を読んで min に書く（turbo off 後に再適用）
+pin_freq() {
+    for cpu_path in /sys/devices/system/cpu/cpu*/cpufreq; do
+        [ -f "$cpu_path/scaling_max_freq" ] || continue
+        max=$(cat "$cpu_path/scaling_max_freq")
+        echo "$max" > "$cpu_path/scaling_min_freq"
+    done
+}
+pin_freq
+
+cur=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo 0)
+max=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null || echo 0)
+echo "  scaling_max  : $(( max / 1000 )) MHz"
+echo "  cur_freq     : $(( cur / 1000 )) MHz"
+echo "  [OK]"
 
 # ---- 3. Turbo Boost 無効化 ----
 echo ""
@@ -89,6 +103,11 @@ else
     echo "  手動: echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo"
 fi
 
+# turbo off 後に scaling_max_freq がベースクロックへ下がるので min を再ピン留め
+pin_freq
+max=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null || echo 0)
+echo "  (re-pinned) scaling_min=scaling_max=$(( max / 1000 )) MHz"
+
 # ---- 確認サマリ ----
 echo ""
 echo "============================================================"
@@ -98,9 +117,11 @@ echo "  logical CPUs  : $(nproc)"
 lscpu | grep -E "Thread\(s\)|Core\(s\)|Socket" | sed 's/^/  /'
 echo "  governor      : $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo N/A)"
 cur=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo 0)
-max=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null || echo 0)
+smax=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null || echo 0)
+smin=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq 2>/dev/null || echo 0)
 echo "  cur_freq      : $(( cur / 1000 )) MHz"
-echo "  max_freq      : $(( max / 1000 )) MHz"
+echo "  scaling_min   : $(( smin / 1000 )) MHz"
+echo "  scaling_max   : $(( smax / 1000 )) MHz"
 no_turbo_val=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || echo N/A)
 echo "  turbo_off     : $no_turbo_val"
 smt_active=$(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo N/A)
@@ -109,6 +130,7 @@ echo "============================================================"
 echo ""
 echo "設定完了。この設定はリブートで元に戻ります。"
 echo "実験後に元に戻す場合:"
-echo "  echo on  > /sys/devices/system/cpu/smt/control"
-echo "  echo 0   > /sys/devices/system/cpu/intel_pstate/no_turbo"
+echo "  echo on      > /sys/devices/system/cpu/smt/control"
+echo "  echo 0       > /sys/devices/system/cpu/intel_pstate/no_turbo"
+echo "  echo active  > /sys/devices/system/cpu/intel_pstate/status"
 echo "  echo powersave | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"
