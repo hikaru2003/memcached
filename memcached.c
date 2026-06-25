@@ -3110,6 +3110,7 @@ static void drive_machine(conn *c) {
 
             --nreqs;
             if (nreqs >= 0) {
+                __atomic_fetch_add(&c->thread->stats.requests_handled, 1, __ATOMIC_RELAXED);
                 reset_cmd_handler(c);
             } else if (c->resp_head) {
                 // flush response pipe on yield.
