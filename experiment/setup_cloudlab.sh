@@ -174,6 +174,27 @@ if [ -z "$SKIP_BUILD" ]; then
         echo "[ERROR] mutilate build failed" >&2; exit 1
     fi
     echo "  Built: $MUTILATE_DIR/mutilate"
+
+    # p999 対応バイナリのビルド（ConnectionStats.h にパッチを当てて別バイナリとして生成）
+    P999_PATCH="$MC_DIR/experiment/mutilate_p999.patch"
+    if [ -f "$P999_PATCH" ]; then
+        echo "  Building mutilate_p999 (p999 output patch) ..."
+        cp ConnectionStats.h ConnectionStats.h.orig
+        patch -p1 < "$P999_PATCH" 2>&1
+        scons -j"$(nproc)" 2>&1 | tail -3
+        if [ -x "$MUTILATE_DIR/mutilate" ]; then
+            cp mutilate mutilate_p999
+            echo "  Built: $MUTILATE_DIR/mutilate_p999"
+        else
+            echo "[WARN] mutilate_p999 build failed, skipping"
+        fi
+        cp ConnectionStats.h.orig ConnectionStats.h
+        rm -f ConnectionStats.h.orig
+        scons -j"$(nproc)" 2>&1 | tail -2
+    else
+        echo "[WARN] $P999_PATCH not found, skipping mutilate_p999 build"
+    fi
+
     cd - >/dev/null
 fi
 echo "[3/4] Done."
@@ -303,9 +324,10 @@ echo "============================================================"
 echo " Setup complete!"
 echo "============================================================"
 echo ""
-echo " memcached : $MC_DIR/memcached"
-echo " mutilate  : $MUTILATE_DIR/mutilate"
-echo " wrapper   : $WRAPPER"
+echo " memcached     : $MC_DIR/memcached"
+echo " mutilate      : $MUTILATE_DIR/mutilate"
+echo " mutilate_p999 : $MUTILATE_DIR/mutilate_p999"
+echo " wrapper       : $WRAPPER"
 echo ""
 echo " Run experiment:"
 echo "   bash ~/run_utdelay_experiment.sh"
