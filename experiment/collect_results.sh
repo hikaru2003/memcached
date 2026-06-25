@@ -7,7 +7,8 @@
 # Description:
 #   各 CloudLab サーバがプッシュした experiment/results/<arch>-utdelay-* ブランチから
 #   結果ファイルを収集し、experiment/results/<arch>/ に配置する。
-#   既存の結果は上書きしない（新しいサブディレクトリのみ追加）。
+#   結果はタイムスタンプ付きサブディレクトリ（utdelay_sweep_YYYYMMDD_HHMMSS/）単位で格納される。
+#   異なる実験ラン同士は衝突しない。同じブランチを再収集した場合は tar が上書きするが内容は同一。
 #
 # Parameters (env vars):
 #   REMOTE       - fetch 元リモート             (default: myfork)
