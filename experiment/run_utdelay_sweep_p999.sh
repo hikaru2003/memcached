@@ -42,7 +42,7 @@
 
 set -uo pipefail
 
-MEMCACHED_BIN="${MEMCACHED_BIN:-./memcached_utdelay}"
+MEMCACHED_BIN="${MEMCACHED_BIN:-./memcached}"
 MEMCACHED_MASTER_BIN="${MEMCACHED_MASTER_BIN:-./memcached_master}"
 MUTILATE_BIN="${MUTILATE_BIN:-../mutilate/mutilate_p999}"
 MC_THREADS="${MC_THREADS:-4}"
