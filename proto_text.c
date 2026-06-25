@@ -564,6 +564,14 @@ static void process_stat(conn *c, mcp_parser_t *pr) {
         buf = item_cachedump(id, limit, &bytes);
         write_and_free(c, buf, bytes);
         return;
+    } else if (strncmp(subcommand, "threads", len) == 0) {
+        for (int i = 0; i < settings.num_threads; i++) {
+            LIBEVENT_THREAD *t = get_worker_thread(i);
+            uint64_t reqs = __atomic_load_n(&t->stats.requests_handled, __ATOMIC_ACQUIRE);
+            char key[32];
+            snprintf(key, sizeof(key), "thread_%d_requests", i);
+            append_stat(key, &append_stats, c, "%llu", (unsigned long long)reqs);
+        }
     } else if (strncmp(subcommand, "conns", len) == 0) {
         process_stats_conns(&append_stats, c);
 #ifdef EXTSTORE
