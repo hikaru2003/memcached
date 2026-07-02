@@ -42,3 +42,18 @@ memcached-*.tar.gz.sha1
 /memcached.spec
 .*.swp
 /compile_commands.json
+
+# experiment binaries and local artifacts
+memcached_utdelay
+memcached_master
+memcached_wait_debug
+memcached_pause
+
+# claude internal files
+.claude/
+
+# experiment directory (managed in results branch)
+experiment/
+
+# local result images
+*.png
