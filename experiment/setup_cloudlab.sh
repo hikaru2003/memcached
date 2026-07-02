@@ -70,11 +70,13 @@ if [ -z "$SKIP_PKG" ]; then
             git build-essential automake autoconf pkg-config \
             libevent-dev \
             scons gengetopt libboost-dev libzmq3-dev \
+            python3-numpy python3-matplotlib \
             util-linux cpuid 2>/dev/null || \
         sudo apt-get install -y \
             git build-essential automake autoconf pkg-config \
             libevent-dev \
             scons gengetopt libboost-dev \
+            python3-numpy python3-matplotlib \
             util-linux
     elif command -v dnf &>/dev/null; then
         sudo dnf install -y \
