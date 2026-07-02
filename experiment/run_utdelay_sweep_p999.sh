@@ -156,6 +156,9 @@ trap cleanup EXIT
 start_memcached() {
     local bin=$1 ppr=$2
     cleanup
+    # Kill any lingering process on the port (e.g. from a previous experiment)
+    fuser -k "${PORT}"/tcp 2>/dev/null || true
+    sleep 0.3
     if [ "$ppr" = "master" ]; then
         taskset -c "$MC_CPUS" "$bin" \
             -p "$PORT" -t "$MC_THREADS" -m 256 -u nobody 2>&1 &
