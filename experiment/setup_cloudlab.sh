@@ -180,17 +180,22 @@ if [ -z "$SKIP_BUILD" ]; then
     if [ -f "$P999_PATCH" ]; then
         echo "  Building mutilate_p999 (p999 output patch) ..."
         cp ConnectionStats.h ConnectionStats.h.orig
-        patch -p1 < "$P999_PATCH" 2>&1
-        scons -j"$(nproc)" 2>&1 | tail -3
-        if [ -x "$MUTILATE_DIR/mutilate" ]; then
-            cp mutilate mutilate_p999
-            echo "  Built: $MUTILATE_DIR/mutilate_p999"
+        if ! patch -p1 < "$P999_PATCH" 2>&1; then
+            echo "[WARN] mutilate_p999 patch failed (context mismatch?), skipping"
+            cp ConnectionStats.h.orig ConnectionStats.h
+            rm -f ConnectionStats.h.orig
         else
-            echo "[WARN] mutilate_p999 build failed, skipping"
+            scons -j"$(nproc)" 2>&1 | tail -3
+            if [ -x "$MUTILATE_DIR/mutilate" ]; then
+                cp mutilate mutilate_p999
+                echo "  Built: $MUTILATE_DIR/mutilate_p999"
+            else
+                echo "[WARN] mutilate_p999 build failed, skipping"
+            fi
+            cp ConnectionStats.h.orig ConnectionStats.h
+            rm -f ConnectionStats.h.orig
+            scons -j"$(nproc)" 2>&1 | tail -2
         fi
-        cp ConnectionStats.h.orig ConnectionStats.h
-        rm -f ConnectionStats.h.orig
-        scons -j"$(nproc)" 2>&1 | tail -2
     else
         echo "[WARN] $P999_PATCH not found, skipping mutilate_p999 build"
     fi

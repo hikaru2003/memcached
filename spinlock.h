@@ -2,8 +2,18 @@
 #define SPINLOCK_H
 
 #include <pthread.h>
+#include <stdint.h>
 
 #define cpu_relax() asm volatile("rep; nop")
+
+static inline uint64_t _rdtsc(void) {
+    uint32_t lo, hi;
+    asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+/* Implemented in thread.c; stores delta into the calling thread's ring buffer. */
+extern void spinlock_record_wait(uint64_t delta);
 
 typedef struct {
     pthread_mutex_t mutex;
@@ -36,14 +46,18 @@ static inline void spinlock_init(spinlock_t *sl) {
 }
 
 static inline void spinlock_lock(spinlock_t *sl) {
+    uint64_t t0 = _rdtsc();
     for (int round = 0; round < global_spin_rounds; round++) {
-        if (pthread_mutex_trylock(&sl->mutex) == 0)
+        if (pthread_mutex_trylock(&sl->mutex) == 0) {
+            spinlock_record_wait(_rdtsc() - t0);
             return;
+        }
         for (int p = 0; p < global_pause_per_round; p++) {
             cpu_relax();
         }
     }
     pthread_mutex_lock(&sl->mutex);
+    spinlock_record_wait(_rdtsc() - t0);
 }
 
 static inline int spinlock_trylock(spinlock_t *sl) {

@@ -21,6 +21,20 @@
 
 int global_spin_rounds     = 30;
 int global_pause_per_round = 0;
+int global_wait_buf_size   = (1 << 20); /* 1M samples per thread by default */
+
+/* Per-worker-thread pointer; set in worker_libevent() so spinlock_record_wait()
+ * can store samples without a syscall or additional lock. */
+static __thread LIBEVENT_THREAD *tl_me = NULL;
+
+void spinlock_record_wait(uint64_t delta) {
+    if (!tl_me || !tl_me->wait_samples)
+        return;
+    tl_me->wait_samples[tl_me->wait_pos] = delta;
+    tl_me->wait_pos = (tl_me->wait_pos + 1) % tl_me->wait_buf_size;
+    if (tl_me->wait_count < tl_me->wait_buf_size)
+        tl_me->wait_count++;
+}
 
 #include "queue.h"
 #include "tls.h"
@@ -519,6 +533,12 @@ static void *worker_libevent(void *arg) {
     if (me->l == NULL || me->lru_bump_buf == NULL) {
         abort();
     }
+
+    me->wait_buf_size = (uint32_t)global_wait_buf_size;
+    me->wait_samples  = calloc(me->wait_buf_size, sizeof(uint64_t));
+    me->wait_pos      = 0;
+    me->wait_count    = 0;
+    tl_me = me;
 
     if (settings.drop_privileges) {
         drop_worker_privileges();
@@ -1139,8 +1159,12 @@ void memcached_thread_init(int nthreads, void *arg) {
     if (ppr_env) {
         global_pause_per_round = atoi(ppr_env);
     }
-    fprintf(stderr, "[spinlock] spin_rounds=%d  pause_per_round=%d\n",
-            global_spin_rounds, global_pause_per_round);
+    const char *wbs_env = getenv("MEMCACHED_WAIT_BUF_SIZE");
+    if (wbs_env) {
+        global_wait_buf_size = atoi(wbs_env);
+    }
+    fprintf(stderr, "[spinlock] spin_rounds=%d  pause_per_round=%d  wait_buf_size=%d\n",
+            global_spin_rounds, global_pause_per_round, global_wait_buf_size);
 
     threads = calloc(nthreads, sizeof(LIBEVENT_THREAD));
     if (! threads) {

@@ -744,6 +744,10 @@ typedef struct {
     char   *ssl_wbuf;
 #endif
     int napi_id;                /* napi id associated with this thread */
+    uint64_t *wait_samples;     /* ring buffer: per-lock-acquisition wait time (rdtsc cycles) */
+    uint32_t  wait_pos;         /* next write index (wraps modulo wait_buf_size) */
+    uint32_t  wait_count;       /* total samples stored (capped at wait_buf_size) */
+    uint32_t  wait_buf_size;    /* ring buffer capacity in entries */
 #ifdef PROXY
     void *proxy_ctx; // proxy global context
     void *L; // lua VM

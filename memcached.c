@@ -3110,7 +3110,9 @@ static void drive_machine(conn *c) {
 
             --nreqs;
             if (nreqs >= 0) {
-                __atomic_fetch_add(&c->thread->stats.requests_handled, 1, __ATOMIC_RELAXED);
+                if (c->thread) {
+                    __atomic_fetch_add(&c->thread->stats.requests_handled, 1, __ATOMIC_RELAXED);
+                }
                 reset_cmd_handler(c);
             } else if (c->resp_head) {
                 // flush response pipe on yield.
@@ -4264,6 +4266,36 @@ static void sig_usrhandler(const int sig) {
     stop_main_loop = GRACE_STOP;
 }
 
+/* SIGUSR2: dump per-thread lock wait-time ring buffers to binary files and reset.
+ * Each file contains a flat array of uint64_t values (rdtsc cycles per acquisition).
+ * Output: wait_samples_thread<N>.bin in the current working directory. */
+static void sig_wait_dump(const int sig) {
+    char fname[64];
+    for (int i = 0; i < settings.num_threads; i++) {
+        LIBEVENT_THREAD *t = get_worker_thread(i);
+        if (!t->wait_samples || t->wait_count == 0)
+            continue;
+        snprintf(fname, sizeof(fname), "wait_samples_thread%d.bin", i);
+        FILE *f = fopen(fname, "wb");
+        if (!f)
+            continue;
+        /* Ring buffer may have wrapped: write oldest-to-newest order. */
+        if (t->wait_count < t->wait_buf_size) {
+            fwrite(t->wait_samples, sizeof(uint64_t), t->wait_count, f);
+        } else {
+            uint32_t start = t->wait_pos; /* oldest entry index */
+            fwrite(t->wait_samples + start, sizeof(uint64_t),
+                   t->wait_buf_size - start, f);
+            fwrite(t->wait_samples, sizeof(uint64_t), start, f);
+        }
+        fclose(f);
+        t->wait_pos   = 0;
+        t->wait_count = 0;
+    }
+    fprintf(stderr, "[wait-time] dumped %d thread(s) to wait_samples_thread*.bin\n",
+            settings.num_threads);
+}
+
 /*
  * On systems that supports multiple page sizes we may reduce the
  * number of TLB-misses by using the biggest available page size
@@ -4865,6 +4897,7 @@ int main (int argc, char **argv) {
     signal(SIGTERM, sig_handler);
     signal(SIGHUP, sighup_handler);
     signal(SIGUSR1, sig_usrhandler);
+    signal(SIGUSR2, sig_wait_dump);
 
     /* init settings */
     settings_init();
