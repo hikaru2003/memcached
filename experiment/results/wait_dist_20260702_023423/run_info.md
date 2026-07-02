@@ -1,0 +1,12 @@
+# Run info (wait-time distribution sweep)
+- date: 2026-07-02 02:34:23
+- commit: 4a90ecf
+- branch: debug/wait-time
+- bin: ./memcached_wait_debug
+- master_bin: ./memcached_master
+- mc_threads: 4 (cpus: 0-3)
+- mut: -T 4 -c 1 -d 32 -r 1 -u 0.5
+- warmup: 10s / duration: 10s / runs: 2
+- spin_rounds: 30
+- pause_per_round values: 0 4 10
+- est_time: ~2 min
