@@ -1,0 +1,7 @@
+# results ブランチは experiment/ のみ管理する
+# それ以外（ソース・ビルド生成物・バイナリ等）はすべて無視
+
+*
+!.gitignore
+!experiment/
+!experiment/**
