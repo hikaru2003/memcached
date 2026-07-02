@@ -88,7 +88,7 @@ if hw_type:
 # ---------------------------------------------------------------------------
 SETUP_URL = (
     "https://raw.githubusercontent.com/hikaru2003/memcached"
-    "/experiment/mysql-like-utdelay/experiment/setup_cloudlab.sh"
+    "/results/experiment/setup_cloudlab.sh"
 )
 
 node.addService(pg.Execute(

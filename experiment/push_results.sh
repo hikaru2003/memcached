@@ -1,34 +1,36 @@
 #!/bin/bash
 # Usage:
-#   # 実験後、memcachedリポジトリのルートで実行:
 #   cd ~/Application/memcached
-#   bash experiment/push_results.sh
+#   bash experiment/push_results.sh                       # utdelay sweep 結果
+#   EXPERIMENT_TYPE=wait bash experiment/push_results.sh  # wait distribution 結果
 #
 # Description:
 #   CloudLab サーバ上での実験結果を GitHub にプッシュする。
-#   experiment/results/<arch>-utdelay-YYYYMMDD ブランチを作成し、
-#   results ディレクトリのみをコミット・プッシュする。
+#   実験タイプに応じてブランチを作成し、結果ファイルのみをコミット・プッシュする。
+#   .bin ファイル（大容量）は除外し、CSV・md のみを push する。
 #
 # Parameters (env vars):
-#   ARCH_NAME   - アーキテクチャ名 (default: 自動検出)
-#   RESULT_DIR  - 結果ディレクトリ (default: experiment/results)
-#   REMOTE      - push 先リモート  (default: myfork)
-#   BASE_BRANCH - 分岐元ブランチ   (default: experiment/mysql-like-utdelay)
+#   EXPERIMENT_TYPE - 実験タイプ: utdelay | wait  (default: utdelay)
+#   ARCH_NAME       - アーキテクチャ名             (default: 自動検出)
+#   RESULT_DIR      - 結果ディレクトリ             (default: experiment/results)
+#   REMOTE          - push 先リモート              (default: myfork)
 #
 # Output:
-#   origin/experiment/results/<arch>-utdelay-YYYYMMDD ブランチ
+#   origin/experiment/results/<arch>-utdelay-YYYYMMDD  : utdelay sweep 結果
+#   origin/experiment/results/<arch>-wait-YYYYMMDD     : wait distribution 結果
 #
 # Prerequisites:
-#   - GitHub への push 権限（SSH key or HTTPS token 設定済み）
-#   - setup_cloudlab.sh 実行済み（memcached がビルド済み）
+#   - GitHub への push 権限（ssh -A でのエージェント転送 or HTTPS token）
+#   - utdelay: run_utdelay_sweep_p999.sh 実行済み
+#   - wait   : run_wait_distribution.sh + extract_wait_stats.py 実行済み
 
 set -uo pipefail
 
+EXPERIMENT_TYPE="${EXPERIMENT_TYPE:-utdelay}"
 RESULT_DIR="${RESULT_DIR:-experiment/results}"
 REMOTE="${REMOTE:-myfork}"
-BASE_BRANCH="${BASE_BRANCH:-experiment/mysql-like-utdelay}"
 
-# アーキテクチャ名の自動検出
+# --- アーキテクチャ名の自動検出 ---
 if [ -z "${ARCH_NAME:-}" ]; then
     cpu_model=$(grep "^model name" /proc/cpuinfo | head -1 | cut -d: -f2 | sed 's/^ *//')
     if echo "$cpu_model" | grep -qiE "broadwell|E5.*v4"; then
@@ -44,85 +46,111 @@ if [ -z "${ARCH_NAME:-}" ]; then
     else
         ARCH_NAME="unknown"
         echo "[WARN] Architecture not detected. CPU: $cpu_model"
-        echo "  Set ARCH_NAME env var to override (e.g., ARCH_NAME=skylake)"
+        echo "  Set ARCH_NAME env var to override (e.g., ARCH_NAME=broadwell)"
         read -rp "  Continue with ARCH_NAME=unknown? [y/N] " ans
         [ "$ans" = "y" ] || exit 1
     fi
 fi
 
 DATE_TAG=$(date '+%Y%m%d')
-BRANCH="experiment/results/${ARCH_NAME}-utdelay-${DATE_TAG}"
+BRANCH="experiment/results/${ARCH_NAME}-${EXPERIMENT_TYPE}-${DATE_TAG}"
 
 echo "============================================================"
 echo " push results: $BRANCH"
 echo "============================================================"
+echo " type       : $EXPERIMENT_TYPE"
 echo " arch       : $ARCH_NAME"
 echo " result_dir : $RESULT_DIR"
 echo " remote     : $REMOTE"
 echo " branch     : $BRANCH"
 echo "============================================================"
 
-# リモートが設定されているか確認（setup_cloudlab.sh で自動設定済みのはず）
+# リモート確認
 if ! git remote | grep -q "^${REMOTE}$"; then
     echo "[ERROR] Remote '$REMOTE' not configured." >&2
-    echo "  setup_cloudlab.sh を実行したか確認してください。" >&2
-    echo "  または: git remote add myfork git@github.com:hikaru2003/memcached.git" >&2
+    echo "  git remote add myfork git@github.com:hikaru2003/memcached.git" >&2
     exit 1
 fi
 
-# ssh -A (agent forwarding) の確認
-if ! ssh -o BatchMode=yes -o ConnectTimeout=5 git@github.com 2>&1 | grep -q "hikaru2003"; then
-    echo "[WARN] GitHub SSH 接続が確認できません。" >&2
-    echo "  ssh -A でログインしているか確認してください（agent forwarding 必須）。" >&2
-fi
-
-# 現在のブランチを記録
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-
-# ブランチ作成（BASE_BRANCHから分岐）
-if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-    echo "  Branch $BRANCH already exists. Checking out."
-    git checkout "$BRANCH"
-else
-    echo "  Creating branch $BRANCH from $BASE_BRANCH ..."
-    git fetch "$REMOTE" "$BASE_BRANCH" 2>/dev/null || true
-    git checkout -b "$BRANCH" "$BASE_BRANCH" 2>/dev/null || \
-        git checkout -b "$BRANCH" "origin/$BASE_BRANCH" 2>/dev/null || \
-        git checkout -b "$BRANCH"
-fi
-
-# 結果ファイルをステージ
+# 結果ディレクトリ確認
 if [ ! -d "$RESULT_DIR" ]; then
     echo "[ERROR] Result directory not found: $RESULT_DIR" >&2
     exit 1
 fi
 
-result_count=$(find "$RESULT_DIR" -name "*.csv" -o -name "summary.md" | wc -l)
-if [ "$result_count" -eq 0 ]; then
-    echo "[WARN] No result files (*.csv, summary.md) found in $RESULT_DIR" >&2
-    read -rp "  Continue anyway? [y/N] " ans
-    [ "$ans" = "y" ] || exit 1
+# push するファイルを収集（タイプ別）
+stage_files() {
+    if [ "$EXPERIMENT_TYPE" = "wait" ]; then
+        # wait_dist_*/wait_summary.csv と run_info.md のみ（.bin は除外）
+        local found=0
+        while IFS= read -r -d '' f; do
+            git add -f "$f"
+            found=$((found + 1))
+        done < <(find "$RESULT_DIR" -path "*/wait_dist_*" \
+            \( -name "wait_summary.csv" -o -name "run_info.md" \) -print0)
+        echo "  staged $found file(s) for wait experiment"
+        if [ "$found" -eq 0 ]; then
+            echo "[ERROR] wait_summary.csv not found. extract_wait_stats.py を先に実行してください。" >&2
+            exit 1
+        fi
+    else
+        # utdelay: raw.csv / summary.md / run_info.md
+        local found=0
+        while IFS= read -r -d '' f; do
+            git add -f "$f"
+            found=$((found + 1))
+        done < <(find "$RESULT_DIR" -path "*/utdelay_*" \
+            \( -name "raw.csv" -o -name "summary.md" -o -name "run_info.md" \) -print0)
+        # p999 ディレクトリも対象
+        while IFS= read -r -d '' f; do
+            git add -f "$f"
+            found=$((found + 1))
+        done < <(find "$RESULT_DIR" -path "*/utdelay_p999_*" \
+            \( -name "raw.csv" -o -name "summary.md" -o -name "run_info.md" \) -print0)
+        echo "  staged $found file(s) for utdelay experiment"
+        if [ "$found" -eq 0 ]; then
+            echo "[WARN] No result CSV found in $RESULT_DIR" >&2
+        fi
+    fi
+}
+
+# 現在のブランチを記録
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+# ブランチ作成
+if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+    echo "  Branch $BRANCH already exists. Checking out."
+    git checkout "$BRANCH"
+else
+    echo "  Creating branch $BRANCH ..."
+    # BASE_BRANCH はタイプに応じて選択
+    if [ "$EXPERIMENT_TYPE" = "wait" ]; then
+        BASE="debug/wait-time"
+    else
+        BASE="experiment/mysql-like-utdelay"
+    fi
+    git checkout -b "$BRANCH" "$BASE" 2>/dev/null || \
+        git checkout -b "$BRANCH" "origin/$BASE" 2>/dev/null || \
+        git checkout -b "$BRANCH"
 fi
 
-git add "$RESULT_DIR/"
+stage_files
 
 if git diff --cached --quiet; then
     echo "[INFO] Nothing to commit. Results already up to date."
 else
-    commit_msg="results: utdelay pause_per_round sweep on ${ARCH_NAME} ($(date '+%Y-%m-%d'))"
+    commit_msg="results: ${EXPERIMENT_TYPE} sweep on ${ARCH_NAME} ($(date '+%Y-%m-%d'))"
     git commit -m "$commit_msg"
     echo "  Committed: $commit_msg"
 fi
 
-# push
 echo "  Pushing to $REMOTE/$BRANCH ..."
 git push "$REMOTE" "${BRANCH}:${BRANCH}"
 
 echo ""
 echo "Pushed: $REMOTE/$BRANCH"
 echo ""
-echo "このサーバでの収集コマンド（光のマシンで実行）:"
+echo "ann サーバでの収集コマンド:"
 echo "  git fetch myfork && bash experiment/collect_results.sh"
 
-# 元のブランチに戻る
 git checkout "$CURRENT_BRANCH"

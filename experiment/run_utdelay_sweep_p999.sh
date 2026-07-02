@@ -137,11 +137,11 @@ est_min=$(( est_sec / 60 ))
     echo "spinlock: [PAUSE x N -> trylock] x SPIN_ROUNDS=${SPIN_ROUNDS} -> mutex_lock"
     echo "master: pthread_mutex_lock のみ（スピンなし）"
     echo ""
-    echo "| label | N | mean_QPS | median_QPS | r_p99_avg | r_p999_avg | cv% | n |"
-    echo "|---|---|---|---|---|---|---|---|"
+    echo "| label | N | mean_QPS | median_QPS | r_p50_avg | r_p99_avg | r_p999_avg | cv% | n |"
+    echo "|---|---|---|---|---|---|---|---|---|"
 } > "$RESULT_DIR/summary.md"
 
-echo "label,pause_per_round,spin_rounds,total_pause_budget,run,QPS,r_avg_us,r_p99_us,r_p999_us,w_avg_us,w_p99_us,w_p999_us" \
+echo "label,pause_per_round,spin_rounds,total_pause_budget,run,QPS,r_avg_us,r_p50_us,r_p99_us,r_p999_us,w_avg_us,w_p50_us,w_p99_us,w_p999_us" \
     > "$RESULT_DIR/raw.csv"
 
 MC_PID=""
@@ -176,15 +176,17 @@ start_memcached() {
     echo "[ERROR] memcached did not start on port $PORT" >&2; return 1
 }
 
-# p999 対応バイナリの出力カラム:
-# $1=type $2=avg $3=std $4=min $5=5th $6=10th $7=90th $8=95th $9=99th $10=999th
+# p50+p999 対応バイナリの出力カラム:
+# $1=type $2=avg $3=std $4=min $5=5th $6=10th $7=50th $8=90th $9=95th $10=99th $11=999th
 extract_qps()    { grep -E "^Total QPS" "$1" | awk '{print $4}'; }
 extract_r_avg()  { grep -E "^read"   "$1" | awk '{print $2}'; }
-extract_r_p99()  { grep -E "^read"   "$1" | awk '{print $9}'; }
-extract_r_p999() { grep -E "^read"   "$1" | awk '{print $10}'; }
+extract_r_p50()  { grep -E "^read"   "$1" | awk '{print $7}'; }
+extract_r_p99()  { grep -E "^read"   "$1" | awk '{print $10}'; }
+extract_r_p999() { grep -E "^read"   "$1" | awk '{print $11}'; }
 extract_w_avg()  { grep -E "^update" "$1" | awk '{print $2}'; }
-extract_w_p99()  { grep -E "^update" "$1" | awk '{print $9}'; }
-extract_w_p999() { grep -E "^update" "$1" | awk '{print $10}'; }
+extract_w_p50()  { grep -E "^update" "$1" | awk '{print $7}'; }
+extract_w_p99()  { grep -E "^update" "$1" | awk '{print $10}'; }
+extract_w_p999() { grep -E "^update" "$1" | awk '{print $11}'; }
 
 compute_stats() {
     echo "$@" | tr ' ' '\n' | awk '
@@ -226,7 +228,8 @@ run_one_config() {
         -T "$MUT_THREADS" -c "$MUT_CONNS" -d "$DEPTH" -t "$WARMUP_SEC" \
         > /dev/null 2>&1 || true
 
-    local qps_list="" r_avg_list="" r_p99_list="" r_p999_list="" w_avg_list="" w_p99_list="" w_p999_list=""
+    local qps_list="" r_avg_list="" r_p50_list="" r_p99_list="" r_p999_list=""
+    local w_avg_list="" w_p50_list="" w_p99_list="" w_p999_list=""
 
     for run_idx in $(seq 1 "$RUNS"); do
         local logfile="$RESULT_DIR/raw/run_${label}_${run_idx}.log"
@@ -235,40 +238,45 @@ run_one_config() {
             -T "$MUT_THREADS" -c "$MUT_CONNS" -d "$DEPTH" -t "$DURATION" \
             > "$logfile" 2>&1
 
-        local qps r_avg r_p99 r_p999 w_avg w_p99 w_p999
+        local qps r_avg r_p50 r_p99 r_p999 w_avg w_p50 w_p99 w_p999
         qps=$(extract_qps    "$logfile")
         r_avg=$(extract_r_avg  "$logfile")
+        r_p50=$(extract_r_p50  "$logfile")
         r_p99=$(extract_r_p99  "$logfile")
         r_p999=$(extract_r_p999 "$logfile")
         w_avg=$(extract_w_avg  "$logfile")
+        w_p50=$(extract_w_p50  "$logfile")
         w_p99=$(extract_w_p99  "$logfile")
         w_p999=$(extract_w_p999 "$logfile")
 
-        printf "    run %d/%d: QPS=%.0f  r_p99=%s  r_p999=%s\n" \
-            "$run_idx" "$RUNS" "$qps" "$r_p99" "$r_p999"
+        printf "    run %d/%d: QPS=%.0f  r_p50=%s  r_p99=%s  r_p999=%s\n" \
+            "$run_idx" "$RUNS" "$qps" "$r_p50" "$r_p99" "$r_p999"
 
         qps_list="$qps_list $qps"
         r_avg_list="$r_avg_list $r_avg"
+        r_p50_list="$r_p50_list $r_p50"
         r_p99_list="$r_p99_list $r_p99"
         r_p999_list="$r_p999_list $r_p999"
         w_avg_list="$w_avg_list $w_avg"
+        w_p50_list="$w_p50_list $w_p50"
         w_p99_list="$w_p99_list $w_p99"
         w_p999_list="$w_p999_list $w_p999"
 
-        echo "${label},${ppr},${SPIN_ROUNDS},${total_budget},${run_idx},${qps},${r_avg},${r_p99},${r_p999},${w_avg},${w_p99},${w_p999}" \
+        echo "${label},${ppr},${SPIN_ROUNDS},${total_budget},${run_idx},${qps},${r_avg},${r_p50},${r_p99},${r_p999},${w_avg},${w_p50},${w_p99},${w_p999}" \
             >> "$RESULT_DIR/raw.csv"
     done
 
     local mean_qps med_qps sd_qps cv_qps
     read mean_qps med_qps sd_qps cv_qps <<< "$(compute_stats $qps_list)"
-    local mean_r_p99 mean_r_p999
+    local mean_r_p50 mean_r_p99 mean_r_p999
+    mean_r_p50=$(compute_mean $r_p50_list)
     mean_r_p99=$(compute_mean $r_p99_list)
     mean_r_p999=$(compute_mean $r_p999_list)
 
-    printf "    STATS: QPS_mean=%.0f  median=%.0f  sd=%.0f  cv=%.2f%%  r_p99=%s  r_p999=%s\n" \
-        "$mean_qps" "$med_qps" "$sd_qps" "$cv_qps" "$mean_r_p99" "$mean_r_p999"
+    printf "    STATS: QPS_mean=%.0f  median=%.0f  sd=%.0f  cv=%.2f%%  r_p50=%s  r_p99=%s  r_p999=%s\n" \
+        "$mean_qps" "$med_qps" "$sd_qps" "$cv_qps" "$mean_r_p50" "$mean_r_p99" "$mean_r_p999"
 
-    echo "| $label | $ppr | $mean_qps | $med_qps | $mean_r_p99 | $mean_r_p999 | $cv_qps | $RUNS |" \
+    echo "| $label | $ppr | $mean_qps | $med_qps | $mean_r_p50 | $mean_r_p99 | $mean_r_p999 | $cv_qps | $RUNS |" \
         >> "$RESULT_DIR/summary.md"
 
     cleanup; sleep 1

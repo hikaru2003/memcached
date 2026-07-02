@@ -1,5 +1,5 @@
 diff --git a/ConnectionStats.h b/ConnectionStats.h
-index e957c19..4e365d8 100644
+index e957c19..538e1cb 100644
 --- a/ConnectionStats.h
 +++ b/ConnectionStats.h
 @@ -123,9 +123,9 @@ class ConnectionStats {
@@ -7,10 +7,10 @@ index e957c19..4e365d8 100644
  
    static void print_header() {
 -    printf("%-7s %7s %7s %7s %7s %7s %7s %7s %7s\n",
-+    printf("%-7s %7s %7s %7s %7s %7s %7s %7s %7s %7s\n",
++    printf("%-7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s\n",
             "#type", "avg", "std", "min", /*"1st",*/ "5th", "10th",
 -           "90th", "95th", "99th");
-+           "90th", "95th", "99th", "999th");
++           "50th", "90th", "95th", "99th", "999th");
    }
  
  #ifdef USE_ADAPTIVE_SAMPLER
@@ -20,8 +20,8 @@ index e957c19..4e365d8 100644
      if (l == 0) {
 -      printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
 -             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-+      printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
-+             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
++      printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
++             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
        if (newline) printf("\n");
        return;
      }
@@ -29,12 +29,12 @@ index e957c19..4e365d8 100644
      sort(copy.begin(), copy.end());
  
 -    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
-+    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
++    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
             tag, std::accumulate(copy.begin(), copy.end(), 0.0) / l,
             copy[0], copy[(l*1) / 100], copy[(l*5) / 100], copy[(l*10) / 100],
 -           copy[(l*90) / 100], copy[(l*95) / 100], copy[(l*99) / 100]
-+           copy[(l*90) / 100], copy[(l*95) / 100], copy[(l*99) / 100],
-+           copy[(l*999) / 1000]
++           copy[(l*50) / 100], copy[(l*90) / 100], copy[(l*95) / 100],
++           copy[(l*99) / 100], copy[(l*999) / 1000]
             );
      if (newline) printf("\n");
    }
@@ -43,12 +43,12 @@ index e957c19..4e365d8 100644
      sort(copy.begin(), copy.end());
  
 -    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
-+    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
++    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
             tag, std::accumulate(copy.begin(), copy.end(), 0.0) / l,
             copy[0], copy[(l*1) / 100], copy[(l*5) / 100], copy[(l*10) / 100],
 -           copy[(l*90) / 100], copy[(l*95) / 100], copy[(l*99) / 100]
-+           copy[(l*90) / 100], copy[(l*95) / 100], copy[(l*99) / 100],
-+           copy[(l*999) / 1000]
++           copy[(l*50) / 100], copy[(l*90) / 100], copy[(l*95) / 100],
++           copy[(l*99) / 100], copy[(l*999) / 1000]
             );
      if (newline) printf("\n");
    }
@@ -58,18 +58,19 @@ index e957c19..4e365d8 100644
      if (sampler.total() == 0) {
 -      printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
 -             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-+      printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
-+             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
++      printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
++             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
        if (newline) printf("\n");
        return;
      }
  
 -    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
-+    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
++    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
             tag, sampler.average(),
             sampler.get_nth(0), sampler.get_nth(1), sampler.get_nth(5),
-            sampler.get_nth(10), sampler.get_nth(90),
+-           sampler.get_nth(10), sampler.get_nth(90),
 -           sampler.get_nth(95), sampler.get_nth(99));
++           sampler.get_nth(10), sampler.get_nth(50), sampler.get_nth(90),
 +           sampler.get_nth(95), sampler.get_nth(99), sampler.get_nth(99.9));
  
      if (newline) printf("\n");
@@ -80,19 +81,50 @@ index e957c19..4e365d8 100644
      if (sampler.total() == 0) {
 -      printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
 -             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-+      printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
-+             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
++      printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
++             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
        if (newline) printf("\n");
        return;
      }
  
 -    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
-+    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
++    printf("%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f",
             tag, sampler.average(), sampler.stddev(),
             sampler.get_nth(0), /*sampler.get_nth(1),*/ sampler.get_nth(5),
-            sampler.get_nth(10), sampler.get_nth(90),
+-           sampler.get_nth(10), sampler.get_nth(90),
 -           sampler.get_nth(95), sampler.get_nth(99));
++           sampler.get_nth(10), sampler.get_nth(50), sampler.get_nth(90),
 +           sampler.get_nth(95), sampler.get_nth(99), sampler.get_nth(99.9));
  
      if (newline) printf("\n");
    }
+diff --git a/SConstruct b/SConstruct
+index 57d0054..a4415e8 100644
+--- a/SConstruct
++++ b/SConstruct
+@@ -16,19 +16,19 @@ if sys.platform == 'darwin':
+ conf = env.Configure(config_h = "config.h")
+ conf.Define("__STDC_FORMAT_MACROS")
+ if not conf.CheckCXX():
+-    print "A compiler with C++11 support is required."
++    print("A compiler with C++11 support is required.")
+     Exit(1)
+-print "Checking for gengetopt...",
++print("Checking for gengetopt...", end=" ")
+ if env.Execute("@which gengetopt &> /dev/null"):
+-    print "not found (required)"
++    print("not found (required)")
+     Exit(1)
+-else: print "found"
++else: print("found")
+ if not conf.CheckLibWithHeader("event", "event2/event.h", "C++"):
+-    print "libevent required"
++    print("libevent required")
+     Exit(1)
+ conf.CheckDeclaration("EVENT_BASE_FLAG_PRECISE_TIMER", '#include <event2/event.h>', "C++")
+ if not conf.CheckLibWithHeader("pthread", "pthread.h", "C++"):
+-    print "pthread required"
++    print("pthread required")
+     Exit(1)
+ conf.CheckLib("rt", "clock_gettime", language="C++")
+ conf.CheckLibWithHeader("zmq", "zmq.hpp", "C++")

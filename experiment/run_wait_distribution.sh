@@ -225,12 +225,13 @@ done
 
 echo ""
 echo "============================================================"
-echo " グラフ生成"
+echo " 統計抽出 (グラフ生成は ann サーバで実施)"
 echo "============================================================"
-python3 experiment/plot_wait_distribution.py \
+python3 experiment/extract_wait_stats.py \
     --dir "$RESULT_DIR" \
-    --max-us 20 \
     2>&1
 
 echo ""
 echo "Done. Results: $RESULT_DIR"
+echo ""
+echo "次のステップ: bash experiment/push_results.sh  (EXPERIMENT_TYPE=wait)"

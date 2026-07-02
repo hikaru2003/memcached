@@ -21,18 +21,16 @@ import matplotlib.ticker as ticker
 from pathlib import Path
 
 # read行のカラム (vals = line.split()[1:] のインデックス)
-# avg(0) std(1) min(2) 5th(3) 10th(4) 90th(5) 95th(6) 99th(7)
-PERCENTILE_COLS = [
-    (0.05, 3, "p5"),
-    (0.10, 4, "p10"),
-    (0.50, 0, "avg"),     # avgをp50の近似として使用（注: 平均≠中央値だが参考として）
-    (0.90, 5, "p90"),
-    (0.95, 6, "p95"),
-    (0.99, 7, "p99"),
+# avg(0) std(1) min(2) 5th(3) 10th(4) 90th(5) 95th(6) 99th(7) [999th(8): mutilate_p999のみ]
+BASE_PERCENTILE_COLS = [
+    (0.05,  3, "p5"),
+    (0.10,  4, "p10"),
+    (0.50,  0, "avg"),     # avgをp50の近似として使用（注: 平均≠中央値だが参考として）
+    (0.90,  5, "p90"),
+    (0.95,  6, "p95"),
+    (0.99,  7, "p99"),
 ]
-
-YTICKS      = [cdf for cdf, _, _ in PERCENTILE_COLS]
-YTICK_LABELS = [name for _, _, name in PERCENTILE_COLS]
+P999_COL = (0.999, 8, "p99.9")
 
 
 def parse_log(path):
@@ -46,8 +44,9 @@ def parse_log(path):
 
 
 def load_data(raw_dir, labels):
-    """各N値ごとに複数ランの平均パーセンタイル値を返す"""
+    """各N値ごとに複数ランの平均パーセンタイル値を返す。p99.9カラムの有無も返す。"""
     data = {}
+    has_p999 = False
     for label in labels:
         if label == "master":
             pattern = str(Path(raw_dir) / "run_master_*.log")
@@ -67,13 +66,19 @@ def load_data(raw_dir, labels):
 
         if runs:
             data[label] = np.mean(runs, axis=0)
+            if len(runs[0]) >= 9:
+                has_p999 = True
         else:
             print(f"Warning: could not parse any log for label={label!r}", file=sys.stderr)
 
-    return data
+    return data, has_p999
 
 
-def plot_cdf(data, labels, output_path, title=None):
+def plot_cdf(data, labels, output_path, title=None, has_p999=False):
+    percentile_cols = BASE_PERCENTILE_COLS + ([P999_COL] if has_p999 else [])
+    yticks       = [cdf for cdf, _, _ in percentile_cols]
+    ytick_labels = [name for _, _, name in percentile_cols]
+
     fig, ax = plt.subplots(figsize=(10, 6))
 
     cmap = plt.cm.tab10
@@ -84,8 +89,8 @@ def plot_cdf(data, labels, output_path, title=None):
             continue
 
         vals = data[label]
-        lat_pts = [vals[col_idx] for _, col_idx, _ in PERCENTILE_COLS]
-        cdf_pts = [cdf for cdf, _, _ in PERCENTILE_COLS]
+        lat_pts = [vals[col_idx] for _, col_idx, _ in percentile_cols if col_idx < len(vals)]
+        cdf_pts = [cdf for cdf, col_idx, _ in percentile_cols if col_idx < len(vals)]
 
         display = "master (baseline)" if label == "master" else f"N={label}"
         linestyle = "--" if label == "master" else "-"
@@ -94,7 +99,10 @@ def plot_cdf(data, labels, output_path, title=None):
                 label=display, color=color, linestyle=linestyle, linewidth=1.5)
 
     ax.set_xscale("log")
-    xticks = [100, 110, 120, 130, 140, 150, 160, 180, 200, 220, 250, 300, 350]
+    if has_p999:
+        xticks = [100, 120, 140, 160, 180, 200, 250, 300, 400, 500, 700, 1000, 1500]
+    else:
+        xticks = [100, 110, 120, 130, 140, 150, 160, 180, 200, 220, 250, 300, 350]
     ax.set_xticks(xticks)
     ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
     ax.xaxis.set_minor_locator(ticker.NullLocator())
@@ -107,18 +115,16 @@ def plot_cdf(data, labels, output_path, title=None):
     )
     ax.set_title(title if title else default_title, fontsize=12)
 
-    ax.set_yticks(YTICKS)
-    ax.set_yticklabels(YTICK_LABELS, fontsize=10)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(ytick_labels, fontsize=10)
     ax.set_ylim(0, 1.05)
 
-    # 主要パーセンタイルに水平点線
-    for cdf_val, _, name in PERCENTILE_COLS:
+    for cdf_val, _, _ in percentile_cols:
         ax.axhline(cdf_val, color="gray", linewidth=0.4, linestyle=":")
 
     ax.legend(loc="lower right", fontsize=10)
     ax.grid(True, which="both", alpha=0.25)
 
-    # avgをp50近似として使っている旨の注記
     ax.annotate(
         "* avg used as p50 approximation",
         xy=(0.01, 0.02), xycoords="axes fraction",
@@ -158,12 +164,12 @@ def main():
     )
     args = parser.parse_args()
 
-    data = load_data(args.data_dir, args.labels)
+    data, has_p999 = load_data(args.data_dir, args.labels)
     if not data:
         print("Error: no data loaded", file=sys.stderr)
         sys.exit(1)
 
-    plot_cdf(data, args.labels, args.output, title=args.title)
+    plot_cdf(data, args.labels, args.output, title=args.title, has_p999=has_p999)
 
 
 if __name__ == "__main__":

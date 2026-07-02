@@ -142,6 +142,27 @@ if [ -z "$SKIP_BUILD" ]; then
     cp "$MASTER_BUILD_DIR/memcached" "$MC_DIR/memcached_master"
     echo "  Built: $MC_DIR/memcached_master"
     cd - >/dev/null
+
+    # debug/wait-time バイナリのビルド（wait_distribution 実験用）
+    echo "  Building memcached_wait_debug (debug/wait-time branch) ..."
+    WAIT_BUILD_DIR="${BASE_DIR}/memcached_wait_src"
+    if [ -d "$WAIT_BUILD_DIR/.git" ]; then
+        git -C "$WAIT_BUILD_DIR" fetch origin debug/wait-time 2>&1 | tail -2 || true
+        git -C "$WAIT_BUILD_DIR" checkout debug/wait-time 2>&1 | tail -1 || true
+        git -C "$WAIT_BUILD_DIR" pull origin debug/wait-time 2>&1 | tail -2 || true
+    else
+        git clone --branch debug/wait-time "$MC_REPO" "$WAIT_BUILD_DIR"
+    fi
+    cd "$WAIT_BUILD_DIR"
+    ./autogen.sh 2>&1 | tail -3
+    ./configure 2>&1 | tail -5
+    make -j"$(nproc)" 2>&1 | tail -5
+    if [ ! -x "$WAIT_BUILD_DIR/memcached" ]; then
+        echo "[ERROR] memcached_wait_debug build failed" >&2; exit 1
+    fi
+    cp "$WAIT_BUILD_DIR/memcached" "$MC_DIR/memcached_wait_debug"
+    echo "  Built: $MC_DIR/memcached_wait_debug"
+    cd - >/dev/null
 fi
 echo "[2/4] Done."
 
@@ -175,30 +196,70 @@ if [ -z "$SKIP_BUILD" ]; then
     fi
     echo "  Built: $MUTILATE_DIR/mutilate"
 
-    # p999 対応バイナリのビルド（ConnectionStats.h にパッチを当てて別バイナリとして生成）
-    P999_PATCH="$MC_DIR/experiment/mutilate_p999.patch"
-    if [ -f "$P999_PATCH" ]; then
-        echo "  Building mutilate_p999 (p999 output patch) ..."
-        cp ConnectionStats.h ConnectionStats.h.orig
-        if ! patch -p1 < "$P999_PATCH" 2>&1; then
-            echo "[WARN] mutilate_p999 patch failed (context mismatch?), skipping"
-            cp ConnectionStats.h.orig ConnectionStats.h
-            rm -f ConnectionStats.h.orig
+    # p50+p999 対応バイナリのビルド（Python で ConnectionStats.h を直接編集）
+    echo "  Building mutilate_p999 (p50+p999 patch via Python) ..."
+    cp ConnectionStats.h ConnectionStats.h.orig
+    python3 - << 'PYEOF'
+import sys
+
+with open("ConnectionStats.h") as f:
+    txt = f.read()
+
+if '"50th"' in txt:
+    print("  ConnectionStats.h already has p50/p999 patch")
+    sys.exit(0)
+
+# 1. print_header format string: 9 -> 11 %7s
+txt = txt.replace(
+    '%-7s %7s %7s %7s %7s %7s %7s %7s %7s\n"',
+    '%-7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s\n"'
+)
+# 2. print_header column names: add 50th and 999th
+txt = txt.replace(
+    '           "90th", "95th", "99th");',
+    '           "50th", "90th", "95th", "99th", "999th");'
+)
+# 3. All printf format strings: 8 floats -> 10 floats
+txt = txt.replace(
+    '%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f"',
+    '%-7s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f"'
+)
+# 4. Zero cases: 8 zeros -> 10 zeros
+txt = txt.replace(
+    '             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);',
+    '             tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);'
+)
+# 5. AdaptiveSampler/copy[] args: add p50 and p999
+txt = txt.replace(
+    '           copy[(l*10) / 100],\n           copy[(l*90) / 100], copy[(l*95) / 100], copy[(l*99) / 100]\n           );',
+    '           copy[(l*10) / 100],\n           copy[(l*50) / 100], copy[(l*90) / 100], copy[(l*95) / 100],\n           copy[(l*99) / 100], copy[(l*999) / 1000]\n           );'
+)
+# 6. HistogramSampler/LogHistogramSampler get_nth: add get_nth(50) and get_nth(99.9)
+txt = txt.replace(
+    '           sampler.get_nth(10), sampler.get_nth(90),\n           sampler.get_nth(95), sampler.get_nth(99));',
+    '           sampler.get_nth(10), sampler.get_nth(50), sampler.get_nth(90),\n           sampler.get_nth(95), sampler.get_nth(99), sampler.get_nth(99.9));'
+)
+
+with open("ConnectionStats.h", "w") as f:
+    f.write(txt)
+
+print("  ConnectionStats.h patched: p50 (50th) and p999 (999th) added")
+PYEOF
+
+    if grep -q '"50th"' ConnectionStats.h; then
+        scons -j"$(nproc)" 2>&1 | tail -3
+        if [ -x "$MUTILATE_DIR/mutilate" ]; then
+            cp mutilate mutilate_p999
+            echo "  Built: $MUTILATE_DIR/mutilate_p999"
         else
-            scons -j"$(nproc)" 2>&1 | tail -3
-            if [ -x "$MUTILATE_DIR/mutilate" ]; then
-                cp mutilate mutilate_p999
-                echo "  Built: $MUTILATE_DIR/mutilate_p999"
-            else
-                echo "[WARN] mutilate_p999 build failed, skipping"
-            fi
-            cp ConnectionStats.h.orig ConnectionStats.h
-            rm -f ConnectionStats.h.orig
-            scons -j"$(nproc)" 2>&1 | tail -2
+            echo "[WARN] mutilate_p999 build failed"
         fi
     else
-        echo "[WARN] $P999_PATCH not found, skipping mutilate_p999 build"
+        echo "[WARN] Python patch did not apply correctly, skipping mutilate_p999"
     fi
+    cp ConnectionStats.h.orig ConnectionStats.h
+    rm -f ConnectionStats.h.orig
+    scons -j"$(nproc)" 2>&1 | tail -2
 
     cd - >/dev/null
 fi
@@ -285,7 +346,7 @@ MUTILATE_DIR="$MUTILATE_DIR"
 
 export MEMCACHED_BIN="\${MC_DIR}/memcached"
 export MEMCACHED_MASTER_BIN="\${MC_DIR}/memcached_master"
-export MUTILATE_BIN="\${MUTILATE_DIR}/mutilate"
+export MUTILATE_BIN="\${MUTILATE_DIR}/mutilate_p999"
 export MC_THREADS=4
 export MUT_THREADS=4
 export MUT_CONNS=1
@@ -306,7 +367,7 @@ echo "PAUSE rec    : ${PAUSE_NOTE}"
 echo ""
 
 cd "\${MC_DIR}"
-bash experiment/run_utdelay_sweep.sh
+bash experiment/run_utdelay_sweep_p999.sh
 WRAPPER_EOF
 chmod +x "$WRAPPER"
 # root で実行された場合、生成ファイルの所有者を実験ユーザに変更
@@ -329,16 +390,23 @@ echo "============================================================"
 echo " Setup complete!"
 echo "============================================================"
 echo ""
-echo " memcached     : $MC_DIR/memcached"
-echo " mutilate      : $MUTILATE_DIR/mutilate"
-echo " mutilate_p999 : $MUTILATE_DIR/mutilate_p999"
-echo " wrapper       : $WRAPPER"
+echo " memcached          : $MC_DIR/memcached"
+echo " memcached_master   : $MC_DIR/memcached_master"
+echo " memcached_wait_debug: $MC_DIR/memcached_wait_debug"
+echo " mutilate           : $MUTILATE_DIR/mutilate"
+echo " mutilate_p999      : $MUTILATE_DIR/mutilate_p999"
+echo " wrapper            : $WRAPPER"
 echo ""
-echo " Run experiment:"
-echo "   bash ~/run_utdelay_experiment.sh"
+echo " Run trial (both experiments, short params):"
+echo "   cd $MC_DIR && bash experiment/run_trial.sh"
+echo ""
+echo " Run full experiments:"
+echo "   bash ~/run_utdelay_experiment.sh       # utdelay sweep"
+echo "   cd $MC_DIR && bash experiment/run_wait_distribution.sh  # wait distribution"
 echo ""
 echo " After experiment, push results:"
 echo "   cd $MC_DIR && bash experiment/push_results.sh"
+echo "   cd $MC_DIR && EXPERIMENT_TYPE=wait bash experiment/push_results.sh"
 echo ""
 echo " ※ GitHub push は ssh -A でログインすれば agent forwarding で認証される"
 echo "============================================================"
