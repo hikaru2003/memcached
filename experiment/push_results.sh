@@ -39,7 +39,7 @@ if [ -z "${ARCH_NAME:-}" ]; then
         ARCH_NAME="ivybridge"
     elif echo "$cpu_model" | grep -qiE "6554|6548|6538|6530|55[0-9][0-9]|emerald"; then
         ARCH_NAME="emeraldrapids"
-    elif echo "$cpu_model" | grep -qiE "6338|6348|6354|ice lake|icelake"; then
+    elif echo "$cpu_model" | grep -qiE "6338|6348|6354|Silver 4[3-9][0-9]{2}|ice lake|icelake"; then
         ARCH_NAME="icelake"
     elif echo "$cpu_model" | grep -qiE "skylake|Silver 4[01]|Gold 5[12]|Gold 6[12]|Platinum 8[12]"; then
         ARCH_NAME="skylake"

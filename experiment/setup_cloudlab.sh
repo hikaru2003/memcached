@@ -268,7 +268,7 @@ elif echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v2|E7-.*v2|E3-.*v2"; then
 elif echo "$cpu_model" | grep -qiE "6554|6548|6538|emerald"; then
     ARCH_NAME="emeraldrapids"
     PAUSE_NOTE="Emerald Rapids(c6620): PAUSE~37cyc"
-elif echo "$cpu_model" | grep -qiE "6338|6348|6354|ice lake|icelake"; then
+elif echo "$cpu_model" | grep -qiE "6338|6348|6354|Silver 4[3-9][0-9]{2}|ice lake|icelake"; then
     ARCH_NAME="icelake"
     PAUSE_NOTE="Ice Lake(sm110): PAUSE~39cyc"
 elif echo "$cpu_model" | grep -qiE "Silver 4114|Silver 41[0-9]{2}|Gold 5[12][0-9]{2}|skylake"; then
