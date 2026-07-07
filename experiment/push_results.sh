@@ -33,7 +33,7 @@ REMOTE="${REMOTE:-myfork}"
 # --- アーキテクチャ名の自動検出 ---
 if [ -z "${ARCH_NAME:-}" ]; then
     cpu_model=$(grep "^model name" /proc/cpuinfo | head -1 | cut -d: -f2 | sed 's/^ *//')
-    if echo "$cpu_model" | grep -qiE "broadwell|E5.*v4|D-1[0-9]{3}"; then
+    if echo "$cpu_model" | grep -qiE "broadwell|E5.*v4"; then
         ARCH_NAME="broadwell"
     elif echo "$cpu_model" | grep -qiE "ivy|E5.*v2|E3.*v2"; then
         ARCH_NAME="ivybridge"
