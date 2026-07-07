@@ -19,6 +19,7 @@
 #   SKIP_BUILD - "1" でビルドをスキップ            (default: "")
 #
 # Output:
+#   /users/Morisaki/memcached/                   - results ブランチのクローン（実験作業ディレクトリ）
 #   /users/Morisaki/memcached/memcached          - utdelay バイナリ
 #   /users/Morisaki/memcached/memcached_master   - master バイナリ
 #   /users/Morisaki/memcached/memcached_wait_debug - wait-time バイナリ
