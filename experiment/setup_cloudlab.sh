@@ -259,7 +259,7 @@ echo "  CPU model  : $cpu_model"
 #   c8220(Ivy): Xeon E5-2650 v2  /  xl170(Broadwell): Xeon E5-2640 v4
 #   c220g5(Skylake): Xeon Silver 4114  /  sm110(IceLake): Xeon Gold 6338
 #   c6620(Emerald): Xeon Gold 6554S
-if echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v4|E7-.*v4|broadwell"; then
+if echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v4|E7-.*v4|D-1[0-9]{3}|broadwell"; then
     ARCH_NAME="broadwell"
     PAUSE_NOTE="Broadwell(xl170): PAUSE~12cyc"
 elif echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v2|E7-.*v2|E3-.*v2"; then

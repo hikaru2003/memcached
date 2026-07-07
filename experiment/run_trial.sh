@@ -26,7 +26,7 @@
 #   - setup_perf_env.sh 適用済み（SMT off, performance governor, turbo off）
 #   - ssh -A でログイン済み（push に必要）
 
-set -uo pipefail
+set -euo pipefail
 
 WARMUP_SEC="${WARMUP_SEC:-30}"
 DURATION="${DURATION:-30}"
@@ -63,11 +63,9 @@ check_binary "$MC_DIR/memcached_wait_debug"
 check_binary "$MUTILATE_DIR/mutilate_p999"
 echo "[OK] All binaries found."
 
-# CPU 環境チェック（警告のみ）
-smt=$(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo "N/A")
-gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "N/A")
-[ "$smt" != "0" ] && echo "[WARN] SMT active=$smt (expected: 0). Run: sudo bash experiment/setup_perf_env.sh"
-[ "$gov" != "performance" ] && echo "[WARN] governor=$gov (expected: performance). Run: sudo bash experiment/setup_perf_env.sh"
+# CPU 環境設定（自動適用）
+echo "Configuring CPU performance environment ..."
+sudo bash experiment/setup_perf_env.sh
 
 echo ""
 echo "============================================================"
