@@ -26,11 +26,11 @@ experiment/
 
 | アーキテクチャ | CloudLab HW | CPU | PAUSE サイクル |
 |---|---|---|---|
-| broadwell | xl170 | Xeon E5-2640 v4 | ~12 cyc |
-| ivybridge | c8220 | Xeon E5-2650 v2 | ~15 cyc |
-| skylake | c220g5 | Xeon Silver 4114 | ~142 cyc |
-| icelake | sm110 | Xeon Gold 6338 | ~39 cyc |
-| emeraldrapids | c6620 | Xeon Gold 6554S | ~37 cyc |
+| broadwell | xl170 (Utah) | Xeon E5-2640 v4 | ~12 cyc |
+| ivybridge | c8220 (Clemson) | Xeon E5-2650 v2 | ~15 cyc |
+| skylake | c220g5 (Wisconsin) | Xeon Silver 4114 | ~142 cyc |
+| icelake | sm110p (Wisconsin) | Xeon Gold 6338 | ~39 cyc |
+| emeraldrapids | c6620 (Utah) | Xeon Gold 6554S | ~37 cyc |
 
 skylake_ann は annサーバ本体（CloudLab ではなし）。
 

@@ -32,10 +32,40 @@ pc = portal.Context()
 request = pc.makeRequestRSpec()
 
 # ---------------------------------------------------------------------------
+# Architecture -> hardware type mapping
+# ---------------------------------------------------------------------------
+arch_options = [
+    ("broadwell",     "Broadwell      (xl170   / Xeon E5-2640 v4,   PAUSE~12cyc)  [Utah]"),
+    ("ivybridge",     "Ivy Bridge     (c8220   / Xeon E5-2650 v2,   PAUSE~15cyc)  [Clemson]"),
+    ("skylake",       "Skylake        (c220g5  / Xeon Silver 4114,  PAUSE~142cyc) [Wisconsin]"),
+    ("icelake",       "Ice Lake       (sm110p  / Xeon Gold 6338,    PAUSE~39cyc)  [Wisconsin]"),
+    ("emeraldrapids", "Emerald Rapids (c6620   / Xeon Gold 6554S,   PAUSE~37cyc)  [Utah]"),
+]
+
+HW_MAP = {
+    "broadwell":     "xl170",
+    "ivybridge":     "c8220",
+    "skylake":       "c220g5",
+    "icelake":       "sm110p",
+    "emeraldrapids": "c6620",
+}
+
+pc.defineParameter(
+    "arch", "Target Architecture",
+    portal.ParameterType.STRING,
+    arch_options[0][0], arch_options,
+    longDescription="CPU microarchitecture to test. Automatically sets the hardware type.")
+
+params = pc.bindParameters()
+pc.verifyParameters()
+
+hw_type = HW_MAP[params.arch]
+
+# ---------------------------------------------------------------------------
 # Node definition
-# Hardware type and disk image are selected manually on CloudLab UI.
 # ---------------------------------------------------------------------------
 node = request.RawPC("node0")
+node.hardware_type = hw_type
 
 # Ubuntu 24.04 (verified on all target arch nodes)
 node.disk_image = "urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU24-64-STD"
