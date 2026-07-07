@@ -62,7 +62,7 @@ if [ -z "$SKIP_PKG" ]; then
         libevent-dev \
         scons gengetopt libboost-dev libzmq3-dev \
         python3-numpy python3-matplotlib \
-        util-linux
+        util-linux htop
     echo "[1/4] Done."
 else
     echo "[1/4] Skipped (SKIP_PKG=1)"
@@ -325,6 +325,16 @@ cd "\${MC_DIR}"
 bash experiment/run_utdelay_sweep_p999.sh
 WRAPPER_EOF
 chmod +x "$WRAPPER"
+
+# ---- htop 設定の配置 ----
+HTOP_CONF_SRC="$MC_DIR/experiment/config/htop/htoprc"
+HTOP_CONF_DST="$BASE_DIR/.config/htop/htoprc"
+if [ -f "$HTOP_CONF_SRC" ]; then
+    mkdir -p "$(dirname "$HTOP_CONF_DST")"
+    cp "$HTOP_CONF_SRC" "$HTOP_CONF_DST"
+    echo "  htop config: $HTOP_CONF_DST"
+fi
+
 chown -R Morisaki "$BASE_DIR" 2>/dev/null || true
 
 echo ""
