@@ -82,6 +82,12 @@ MC_CPUS="$MC_CPUS" \
 WL_CPUS="$WL_CPUS" \
 bash experiment/run_utdelay_sweep_p999.sh
 
+if [ -z "$SKIP_PUSH" ]; then
+    echo ""
+    echo "  pushing utdelay results ..."
+    bash experiment/push_results.sh
+fi
+
 echo ""
 echo "============================================================"
 echo " [2/2] wait distribution  runs=${RUNS_WAIT}"
