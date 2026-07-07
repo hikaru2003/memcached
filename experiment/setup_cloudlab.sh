@@ -15,12 +15,12 @@
 #   SKIP_BUILD - "1" でビルドをスキップ            (default: "")
 #
 # Output:
-#   /users/Morisaki/memcached_utdelay/memcached          - utdelay バイナリ
-#   /users/Morisaki/memcached_utdelay/memcached_master   - master バイナリ
-#   /users/Morisaki/memcached_utdelay/memcached_wait_debug - wait-time バイナリ
-#   /users/Morisaki/mutilate/mutilate                    - mutilate バイナリ
-#   /users/Morisaki/mutilate/mutilate_p999               - p50+p999 対応バイナリ
-#   /users/Morisaki/run_utdelay_experiment.sh            - 実験実行用ラッパー
+#   /users/Morisaki/memcached/memcached          - utdelay バイナリ
+#   /users/Morisaki/memcached/memcached_master   - master バイナリ
+#   /users/Morisaki/memcached/memcached_wait_debug - wait-time バイナリ
+#   /users/Morisaki/mutilate/mutilate            - mutilate バイナリ
+#   /users/Morisaki/mutilate/mutilate_p999       - p50+p999 対応バイナリ
+#   /users/Morisaki/run_utdelay_experiment.sh    - 実験実行用ラッパー
 #
 # Prerequisites:
 #   - sudo 権限があること
@@ -35,15 +35,15 @@ BASE_DIR="/users/Morisaki"
 MC_REPO="https://github.com/hikaru2003/memcached.git"
 MUTILATE_REPO="https://github.com/leverich/mutilate.git"
 
-MC_BRANCH="experiment/mysql-like-utdelay"
-MC_DIR="$BASE_DIR/memcached_utdelay"
+MC_DIR="$BASE_DIR/memcached"          # results ブランチ（スクリプト用）
+UTDELAY_BUILD_DIR="$BASE_DIR/memcached_utdelay_src"   # ビルド専用
 MUTILATE_DIR="$BASE_DIR/mutilate"
 
 echo "============================================================"
 echo " CloudLab setup: memcached + mutilate"
 echo "============================================================"
 echo " BASE_DIR  : $BASE_DIR"
-echo " MC_BRANCH : $MC_BRANCH"
+echo " MC_DIR    : $MC_DIR  (results branch)"
 echo "============================================================"
 
 # ---- OS パッケージ ----
@@ -68,24 +68,33 @@ mkdir -p "$BASE_DIR"
 # ---- memcached clone & build ----
 echo ""
 echo "[2/4] Setting up memcached ..."
+
+# results ブランチ（実験スクリプト用）をクローン
 if [ -d "$MC_DIR/.git" ]; then
-    echo "  Already cloned. Fetching & checking out $MC_BRANCH ..."
+    echo "  Already cloned (results). Pulling ..."
     git -C "$MC_DIR" fetch origin
-    git -C "$MC_DIR" checkout "$MC_BRANCH"
-    git -C "$MC_DIR" pull origin "$MC_BRANCH" || true
+    git -C "$MC_DIR" checkout results
+    git -C "$MC_DIR" pull origin results || true
 else
-    git clone --branch "$MC_BRANCH" "$MC_REPO" "$MC_DIR"
+    git clone --branch results "$MC_REPO" "$MC_DIR"
 fi
 
 if [ -z "$SKIP_BUILD" ]; then
+    # utdelay バイナリのビルド（experiment/mysql-like-utdelay ブランチ）
     echo "  Building memcached (utdelay branch) ..."
-    cd "$MC_DIR"
+    if [ -d "$UTDELAY_BUILD_DIR/.git" ]; then
+        git -C "$UTDELAY_BUILD_DIR" pull origin experiment/mysql-like-utdelay 2>&1 | tail -2 || true
+    else
+        git clone --branch experiment/mysql-like-utdelay "$MC_REPO" "$UTDELAY_BUILD_DIR"
+    fi
+    cd "$UTDELAY_BUILD_DIR"
     ./autogen.sh 2>&1 | tail -3
     ./configure 2>&1 | tail -5
     make -j"$(nproc)" 2>&1 | tail -5
-    if [ ! -x "$MC_DIR/memcached" ]; then
-        echo "[ERROR] memcached build failed" >&2; exit 1
+    if [ ! -x "$UTDELAY_BUILD_DIR/memcached" ]; then
+        echo "[ERROR] memcached (utdelay) build failed" >&2; exit 1
     fi
+    cp "$UTDELAY_BUILD_DIR/memcached" "$MC_DIR/memcached"
     echo "  Built: $MC_DIR/memcached"
     cd - >/dev/null
 
@@ -328,19 +337,19 @@ echo "============================================================"
 echo " Setup complete!"
 echo "============================================================"
 echo ""
-echo " memcached_utdelay  : $MC_DIR/memcached"
-echo " memcached_master   : $MC_DIR/memcached_master"
+echo " memcached (utdelay) : $MC_DIR/memcached"
+echo " memcached_master    : $MC_DIR/memcached_master"
 echo " memcached_wait_debug: $MC_DIR/memcached_wait_debug"
-echo " mutilate           : $MUTILATE_DIR/mutilate"
-echo " mutilate_p999      : $MUTILATE_DIR/mutilate_p999"
-echo " wrapper            : $WRAPPER"
+echo " mutilate            : $MUTILATE_DIR/mutilate"
+echo " mutilate_p999       : $MUTILATE_DIR/mutilate_p999"
+echo " wrapper             : $WRAPPER"
 echo ""
 echo " Run trial (both experiments, short params):"
 echo "   cd $MC_DIR && bash experiment/run_trial.sh"
 echo ""
 echo " Run full experiments:"
-echo "   bash ~/run_utdelay_experiment.sh       # utdelay sweep"
-echo "   cd $MC_DIR && bash experiment/run_wait_distribution.sh  # wait distribution"
+echo "   bash ~/run_utdelay_experiment.sh                          # utdelay sweep"
+echo "   cd $MC_DIR && bash experiment/run_wait_distribution.sh   # wait distribution"
 echo ""
 echo " After experiment, push results:"
 echo "   cd $MC_DIR && bash experiment/push_results.sh"
