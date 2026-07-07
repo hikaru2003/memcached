@@ -23,7 +23,7 @@
 #   DURATION               - 計測秒数                        (default: 60)
 #   RUNS                   - 各 N のラン数                    (default: 3)
 #   SPIN_ROUNDS            - trylock 試行回数（固定）          (default: 30)
-#   PAUSE_PER_ROUND_VALUES - N sweep 値                      (default: 0 4 10 30 100 200)
+#   PAUSE_PER_ROUND_VALUES - N sweep 値                      (default: 0-10全整数, N15, step-5 in 20-100, 150 200)
 #   PORT                   - memcached ポート                (default: 11222)
 #   MC_CPUS                - memcached CPU affinity          (default: 0-3)
 #   WL_CPUS                - mutilate CPU affinity           (default: 4-7)
@@ -55,7 +55,7 @@ WARMUP_SEC="${WARMUP_SEC:-300}"
 DURATION="${DURATION:-60}"
 RUNS="${RUNS:-10}"
 SPIN_ROUNDS="${SPIN_ROUNDS:-30}"
-PAUSE_PER_ROUND_VALUES="${PAUSE_PER_ROUND_VALUES:-0 2 4 10 30 100 200}"
+PAUSE_PER_ROUND_VALUES="${PAUSE_PER_ROUND_VALUES:-0 1 2 3 4 5 6 7 8 9 10 15 20 25 30 35 40 45 50 55 60 65 70 75 80 85 90 95 100 150 200}"
 PORT="${PORT:-11222}"
 MC_CPUS="${MC_CPUS:-0-3}"
 WL_CPUS="${WL_CPUS:-4-7}"

@@ -1,55 +1,42 @@
 #!/bin/bash
 # Usage:
-#   # 素のCloudLabサーバ上で実行（memcachedリポジトリをclone前でも可）:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/hikaru2003/memcached/experiment/mysql-like-utdelay/experiment/setup_cloudlab.sh)
-#
-#   # すでにclone済みの場合:
-#   bash ~/Application/memcached/experiment/setup_cloudlab.sh
+#   sudo bash /local/setup_memcached.sh   # CloudLab pg.Execute 経由（自動実行）
+#   sudo bash experiment/setup_cloudlab.sh  # 手動再実行
 #
 # Description:
-#   CloudLab サーバ（Ubuntu/Debian）での memcached + mutilate セットアップ。
-#   - OS パッケージのインストール
-#   - hikaru2003/memcached (experiment/mysql-like-utdelay) のビルド
-#   - leverich/mutilate のビルド（Python3 対応 SConstruct パッチ適用）
-#   - CPU トポロジーの表示と推奨 env var の出力
+#   CloudLab サーバ（Ubuntu 24.04）での memcached + mutilate セットアップ。
+#   - OS パッケージのインストール（apt のみ）
+#   - hikaru2003/memcached 3バイナリのビルド
+#   - leverich/mutilate (standard + p999) のビルド
+#   - アーキテクチャ判定・ラッパースクリプト生成
 #
 # Parameters (env vars):
-#   BASE_DIR   - 作業ディレクトリ親                (default: ~/Application)
-#   MC_BRANCH  - memcached ブランチ                (default: experiment/mysql-like-utdelay)
 #   SKIP_PKG   - "1" でパッケージインストールをスキップ (default: "")
 #   SKIP_BUILD - "1" でビルドをスキップ            (default: "")
 #
 # Output:
-#   $BASE_DIR/memcached/memcached      - memcached バイナリ
-#   $BASE_DIR/mutilate/mutilate        - mutilate バイナリ
-#   ~/run_utdelay_experiment.sh        - 実験実行用ラッパースクリプト（arch別設定済み）
+#   /users/Morisaki/memcached_utdelay/memcached          - utdelay バイナリ
+#   /users/Morisaki/memcached_utdelay/memcached_master   - master バイナリ
+#   /users/Morisaki/memcached_utdelay/memcached_wait_debug - wait-time バイナリ
+#   /users/Morisaki/mutilate/mutilate                    - mutilate バイナリ
+#   /users/Morisaki/mutilate/mutilate_p999               - p50+p999 対応バイナリ
+#   /users/Morisaki/run_utdelay_experiment.sh            - 実験実行用ラッパー
 #
 # Prerequisites:
 #   - sudo 権限があること
 #   - インターネット接続（github.com）
-#   - 結果を push する場合は GitHub 認証設定が必要（スクリプト末尾の案内を参照）
 
 set -uo pipefail
 
-# CloudLab の pg.Execute は root で実行される。
-# root の場合、実験ユーザ（uid>=1000）のホームを自動検出して BASE_DIR を設定する。
-if [ "$(id -u)" = "0" ] && [ -z "${BASE_DIR:-}" ]; then
-    ACTUAL_USER=$(getent passwd | awk -F: '$3 >= 1000 && $1 != "nobody" {print $1; exit}')
-    ACTUAL_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
-    BASE_DIR="${ACTUAL_HOME}/Application"
-    echo "[setup] Running as root, detected experiment user: $ACTUAL_USER (home: $ACTUAL_HOME)"
-else
-    BASE_DIR="${BASE_DIR:-$HOME/Application}"
-fi
-
-MC_BRANCH="${MC_BRANCH:-experiment/mysql-like-utdelay}"
 SKIP_PKG="${SKIP_PKG:-}"
 SKIP_BUILD="${SKIP_BUILD:-}"
 
+BASE_DIR="/users/Morisaki"
 MC_REPO="https://github.com/hikaru2003/memcached.git"
 MUTILATE_REPO="https://github.com/leverich/mutilate.git"
 
-MC_DIR="$BASE_DIR/memcached"
+MC_BRANCH="experiment/mysql-like-utdelay"
+MC_DIR="$BASE_DIR/memcached_utdelay"
 MUTILATE_DIR="$BASE_DIR/mutilate"
 
 echo "============================================================"
@@ -63,38 +50,14 @@ echo "============================================================"
 if [ -z "$SKIP_PKG" ]; then
     echo ""
     echo "[1/4] Installing OS packages ..."
-    # Ubuntu 24.04 (CloudLab default, verified on all 5 arch nodes)
-    if command -v apt-get &>/dev/null; then
-        sudo apt-get update -qq
-        sudo apt-get install -y \
-            git build-essential automake autoconf pkg-config \
-            libevent-dev \
-            scons gengetopt libboost-dev libzmq3-dev \
-            python3-numpy python3-matplotlib \
-            util-linux cpuid 2>/dev/null || \
-        sudo apt-get install -y \
-            git build-essential automake autoconf pkg-config \
-            libevent-dev \
-            scons gengetopt libboost-dev \
-            python3-numpy python3-matplotlib \
-            util-linux
-    elif command -v dnf &>/dev/null; then
-        sudo dnf install -y \
-            git gcc gcc-c++ make automake autoconf pkgconfig \
-            libevent-devel \
-            scons gengetopt boost-devel zeromq-devel \
-            util-linux
-    elif command -v yum &>/dev/null; then
-        sudo yum install -y \
-            git gcc gcc-c++ make automake autoconf pkgconfig \
-            libevent-devel \
-            scons gengetopt boost-devel zeromq-devel \
-            util-linux
-    else
-        echo "[WARN] Unknown package manager. Install manually:" >&2
-        echo "  git, gcc, make, automake, autoconf, libevent-dev," >&2
-        echo "  scons, gengetopt, libboost-dev, libzmq3-dev" >&2
-    fi
+    # Ubuntu 24.04 (CloudLab default, verified on all target arch nodes)
+    sudo apt update -qq
+    sudo apt install -y \
+        git build-essential automake autoconf pkg-config \
+        libevent-dev \
+        scons gengetopt libboost-dev libzmq3-dev \
+        python3-numpy python3-matplotlib \
+        util-linux
     echo "[1/4] Done."
 else
     echo "[1/4] Skipped (SKIP_PKG=1)"
@@ -272,16 +235,8 @@ echo ""
 echo "[4/4] Detecting CPU topology ..."
 
 cpu_model=$(grep "^model name" /proc/cpuinfo | head -1 | cut -d: -f2 | sed 's/^ *//')
-sockets=$(lscpu | grep "^Socket(s):" | awk '{print $2}')
-cores_per_socket=$(lscpu | grep "^Core(s) per socket:" | awk '{print $4}')
-threads_per_core=$(lscpu | grep "^Thread(s) per core:" | awk '{print $4}')
-total_logical=$(nproc)
-total_physical=$(( sockets * cores_per_socket ))
 
 echo "  CPU model  : $cpu_model"
-echo "  Sockets    : $sockets"
-echo "  Phys cores : $total_physical  (${cores_per_socket}/socket)"
-echo "  HT threads : $threads_per_core per core  (${total_logical} logical total)"
 
 # アーキテクチャ判定
 # PAUSE実測値（simple_mysql実験 result/2026_6_3/README.md より）:
@@ -310,30 +265,14 @@ else
     PAUSE_NOTE="Unknown arch -- PAUSE cycles unknown, verify manually"
 fi
 
-# 全アーキ共通のスイープ値（グラフ比較のため統一）
-# SPIN_ROUNDS=30固定なので total_pause_budget = N * 30
-# Skylake(142cyc)でN=200 → 852K cycles、Ivy(15cyc)でN=200 → 90K cycles
-PAUSE_REC="0 1 2 3 4 5 6 7 8 9 10 15 20 30 50 80 100 150 200"
+MC_CPUS_REC="0-3"
+WL_CPUS_REC="4-7"
 
 echo "  Arch guess : $ARCH_NAME  ($PAUSE_NOTE)"
-echo "  PAUSE sweep: $PAUSE_REC  (unified across all arch for graph comparison)"
-
-# MC(4スレッド) + mutilate(4スレッド) = 8物理コア必要
-# 物理コアを前半/後半に割り当て（HT兄弟は使わない）
-if [ "$total_physical" -ge 8 ]; then
-    MC_CPUS_REC="0-3"
-    WL_CPUS_REC="4-7"
-else
-    MC_CPUS_REC="0-$((total_physical/2 - 1))"
-    WL_CPUS_REC="$((total_physical/2))-$((total_physical - 1))"
-fi
-
-echo "  Suggested  : MC_CPUS=$MC_CPUS_REC  WL_CPUS=$WL_CPUS_REC"
+echo "  MC_CPUS    : $MC_CPUS_REC  WL_CPUS: $WL_CPUS_REC"
 
 # ---- ラッパースクリプト生成 ----
-# root実行時は $HOME=/root なので実験ユーザのホームに配置する
-WRAPPER_HOME="${ACTUAL_HOME:-$HOME}"
-WRAPPER="$WRAPPER_HOME/run_utdelay_experiment.sh"
+WRAPPER="$BASE_DIR/run_utdelay_experiment.sh"
 cat > "$WRAPPER" << WRAPPER_EOF
 #!/bin/bash
 # Auto-generated by setup_cloudlab.sh
@@ -359,7 +298,7 @@ export WARMUP_SEC=300
 export DURATION=60
 export RUNS=20
 export SPIN_ROUNDS=30
-export PAUSE_PER_ROUND_VALUES="0 1 2 3 4 5 6 7 8 9 10 15 20 30 50 80 100 150 200"
+export PAUSE_PER_ROUND_VALUES="0 1 2 3 4 5 6 7 8 9 10 15 20 25 30 35 40 45 50 55 60 65 70 75 80 85 90 95 100 150 200"
 export PORT=11222
 export MC_CPUS="${MC_CPUS_REC}"
 export WL_CPUS="${WL_CPUS_REC}"
@@ -372,10 +311,7 @@ cd "\${MC_DIR}"
 bash experiment/run_utdelay_sweep_p999.sh
 WRAPPER_EOF
 chmod +x "$WRAPPER"
-# root で実行された場合、生成ファイルの所有者を実験ユーザに変更
-if [ "$(id -u)" = "0" ] && [ -n "${ACTUAL_USER:-}" ]; then
-    chown -R "$ACTUAL_USER" "$BASE_DIR" "$WRAPPER" 2>/dev/null || true
-fi
+chown -R Morisaki "$BASE_DIR" 2>/dev/null || true
 
 echo ""
 echo "[4/4] Done."
@@ -392,7 +328,7 @@ echo "============================================================"
 echo " Setup complete!"
 echo "============================================================"
 echo ""
-echo " memcached          : $MC_DIR/memcached"
+echo " memcached_utdelay  : $MC_DIR/memcached"
 echo " memcached_master   : $MC_DIR/memcached_master"
 echo " memcached_wait_debug: $MC_DIR/memcached_wait_debug"
 echo " mutilate           : $MUTILATE_DIR/mutilate"
