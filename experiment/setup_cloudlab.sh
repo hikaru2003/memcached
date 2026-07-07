@@ -335,8 +335,6 @@ if [ -f "$HTOP_CONF_SRC" ]; then
     echo "  htop config: $HTOP_CONF_DST"
 fi
 
-chown -R Morisaki "$BASE_DIR" 2>/dev/null || true
-
 echo ""
 echo "[4/4] Done."
 
@@ -344,12 +342,14 @@ echo "[4/4] Done."
 git config --global user.name "hikaru2003"
 git config --global user.email "hikaru.morisaki.0316@gmail.com"
 
-# ---- myfork remote を SSH URL で設定（ssh -A で agent forwarding 前提）----
+# ---- myfork remote を SSH URL で設定（chown 前に実行: git safe.directory 問題回避）----
 if git -C "$MC_DIR" remote | grep -q "^myfork$"; then
     git -C "$MC_DIR" remote set-url myfork git@github.com:hikaru2003/memcached.git
 else
     git -C "$MC_DIR" remote add myfork git@github.com:hikaru2003/memcached.git
 fi
+
+chown -R Morisaki "$BASE_DIR" 2>/dev/null || true
 
 echo ""
 echo "============================================================"
