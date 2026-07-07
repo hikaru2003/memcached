@@ -340,6 +340,10 @@ chown -R Morisaki "$BASE_DIR" 2>/dev/null || true
 echo ""
 echo "[4/4] Done."
 
+# ---- git ユーザ設定 ----
+git config --global user.name "hikaru2003"
+git config --global user.email "hikaru.morisaki.0316@gmail.com"
+
 # ---- myfork remote を SSH URL で設定（ssh -A で agent forwarding 前提）----
 if git -C "$MC_DIR" remote | grep -q "^myfork$"; then
     git -C "$MC_DIR" remote set-url myfork git@github.com:hikaru2003/memcached.git
