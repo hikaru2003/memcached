@@ -6,7 +6,11 @@
 # Description:
 #   CloudLab サーバ（Ubuntu 24.04）での memcached + mutilate セットアップ。
 #   - OS パッケージのインストール（apt のみ）
-#   - hikaru2003/memcached 3バイナリのビルド
+#   - results ブランチを /users/Morisaki/memcached/ にクローン（実験スクリプト用）
+#   - memcached バイナリを3ブランチからビルドして /users/Morisaki/memcached/ に配置
+#       experiment/mysql-like-utdelay -> memcached  (utdelay計測用)
+#       master                        -> memcached_master  (baseline)
+#       debug/wait-time               -> memcached_wait_debug  (wait分布計測用)
 #   - leverich/mutilate (standard + p999) のビルド
 #   - アーキテクチャ判定・ラッパースクリプト生成
 #
