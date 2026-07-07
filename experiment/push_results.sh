@@ -94,22 +94,16 @@ stage_files() {
             exit 1
         fi
     else
-        # utdelay: raw.csv / summary.md / run_info.md
+        # utdelay: raw.csv / summary.md / run_info.md / raw/*.log
         local found=0
         while IFS= read -r -d '' f; do
             git add -f "$f"
             found=$((found + 1))
-        done < <(find "$RESULT_DIR" -path "*/utdelay_*" \
-            \( -name "raw.csv" -o -name "summary.md" -o -name "run_info.md" \) -print0)
-        # p999 ディレクトリも対象
-        while IFS= read -r -d '' f; do
-            git add -f "$f"
-            found=$((found + 1))
         done < <(find "$RESULT_DIR" -path "*/utdelay_p999_*" \
-            \( -name "raw.csv" -o -name "summary.md" -o -name "run_info.md" \) -print0)
+            \( -name "raw.csv" -o -name "summary.md" -o -name "run_info.md" -o -name "*.log" \) -print0)
         echo "  staged $found file(s) for utdelay experiment"
         if [ "$found" -eq 0 ]; then
-            echo "[WARN] No result CSV found in $RESULT_DIR" >&2
+            echo "[WARN] No result files found in $RESULT_DIR" >&2
         fi
     fi
 }
