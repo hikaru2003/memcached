@@ -31,9 +31,6 @@ import geni.rspec.pg as pg
 pc = portal.Context()
 request = pc.makeRequestRSpec()
 
-params = pc.bindParameters()
-pc.verifyParameters()
-
 # ---------------------------------------------------------------------------
 # Node definition
 # Hardware type and disk image are selected manually on CloudLab UI.
