@@ -1,0 +1,6 @@
+# started on Wed Jul  8 03:03:00 2026
+
+546204,,cache-misses,237613680597,100.00,0.00,of all cache refs
+150455,,LLC-load-misses,237613592844,100.00,,
+2915258218,,offcore_requests.demand_rfo,237613454941,100.00,,
+11355851543,,cache-references,237613361874,100.00,,
