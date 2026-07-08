@@ -1,0 +1,12 @@
+# Run info (wait-time distribution sweep)
+- date: 2026-07-07 08:47:33
+- commit: 8a04035a
+- branch: results
+- bin: /users/Morisaki/memcached/memcached_wait_debug
+- master_bin: /users/Morisaki/memcached/memcached_master
+- mc_threads: 4 (cpus: 0-3)
+- mut: -T 4 -c 1 -d 32 -r 1 -u 0.5
+- warmup: 30s / duration: 30s / runs: 1
+- spin_rounds: 30
+- pause_per_round values: 0 4 30
+- est_time: ~4 min
