@@ -58,8 +58,9 @@ PORT="${PORT:-11222}"
 MC_CPUS="${MC_CPUS:-0-3}"
 WL_CPUS="${WL_CPUS:-4-7}"
 
-# perf イベント（汎用・Skylake / Broadwell 両対応）
-PERF_EVENTS="cache-misses,LLC-load-misses,LLC-store-misses,cache-references"
+# perf イベント（Skylake / Broadwell 両対応）
+# LLC-store-misses は Broadwell で未実装（0固定）のため offcore_requests.demand_rfo を使用
+PERF_EVENTS="cache-misses,LLC-load-misses,offcore_requests.demand_rfo,cache-references"
 
 # ---- CPU 環境チェック ----
 check_perf_env() {
@@ -228,7 +229,7 @@ run_one_config() {
         local cm llc_ld llc_st cr llc_miss_rate
         cm=$(parse_perf_value     "$perf_log" "cache-misses")
         llc_ld=$(parse_perf_value "$perf_log" "LLC-load-misses")
-        llc_st=$(parse_perf_value "$perf_log" "LLC-store-misses")
+        llc_st=$(parse_perf_value "$perf_log" "offcore_requests.demand_rfo")
         cr=$(parse_perf_value     "$perf_log" "cache-references")
 
         # LLC miss 率（cache-misses / cache-references * 100）
@@ -297,7 +298,7 @@ est_min=$(( est_sec / 60 ))
     echo "- est_time: ~${est_min} min"
 } > "$RESULT_DIR/run_info.md"
 
-echo "label,pause_per_round,spin_rounds,total_pause_budget,run,QPS,r_p99_us,r_p999_us,cache_misses,LLC_load_misses,LLC_store_misses,cache_references,llc_miss_rate_pct" \
+echo "label,pause_per_round,spin_rounds,total_pause_budget,run,QPS,r_p99_us,r_p999_us,cache_misses,LLC_load_misses,demand_rfo,cache_references,llc_miss_rate_pct" \
     > "$RESULT_DIR/summary.csv"
 
 echo "============================================================"
