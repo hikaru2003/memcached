@@ -10,7 +10,7 @@
 #   .bin ファイル（大容量）は除外し、CSV・md のみを push する。
 #
 # Parameters (env vars):
-#   EXPERIMENT_TYPE - 実験タイプ: utdelay | wait  (default: utdelay)
+#   EXPERIMENT_TYPE - 実験タイプ: utdelay | wait | futex  (default: utdelay)
 #   ARCH_NAME       - アーキテクチャ名             (default: 自動検出)
 #   RESULT_DIR      - 結果ディレクトリ             (default: experiment/results)
 #   REMOTE          - push 先リモート              (default: myfork)
@@ -91,6 +91,19 @@ stage_files() {
         echo "  staged $found file(s) for wait experiment"
         if [ "$found" -eq 0 ]; then
             echo "[ERROR] wait_summary.csv not found. extract_wait_stats.py を先に実行してください。" >&2
+            exit 1
+        fi
+    elif [ "$EXPERIMENT_TYPE" = "futex" ]; then
+        # futex: summary.csv / run_info.md のみ（raw/*.txt は除外）
+        local found=0
+        while IFS= read -r -d '' f; do
+            git add -f "$f"
+            found=$((found + 1))
+        done < <(find "$RESULT_DIR" -path "*/futex_*" \
+            \( -name "summary.csv" -o -name "run_info.md" \) -print0)
+        echo "  staged $found file(s) for futex experiment"
+        if [ "$found" -eq 0 ]; then
+            echo "[ERROR] futex result files not found. run_futex_sweep.sh を先に実行してください。" >&2
             exit 1
         fi
     else
