@@ -21,6 +21,18 @@
 
 int global_spin_rounds     = 30;
 int global_pause_per_round = 0;
+int global_handoff_buf_size = (1 << 20); /* 1M samples per thread */
+
+static __thread LIBEVENT_THREAD *tl_me = NULL;
+
+void spinlock_record_handoff(uint64_t delta) {
+    if (!tl_me || !tl_me->handoff_samples)
+        return;
+    tl_me->handoff_samples[tl_me->handoff_pos] = delta;
+    tl_me->handoff_pos = (tl_me->handoff_pos + 1) % tl_me->handoff_buf_size;
+    if (tl_me->handoff_count < tl_me->handoff_buf_size)
+        tl_me->handoff_count++;
+}
 
 #include "queue.h"
 #include "tls.h"
@@ -460,6 +472,15 @@ static void setup_thread(LIBEVENT_THREAD *me) {
         fprintf(stderr, "Failed to create read buffer cache\n");
         exit(EXIT_FAILURE);
     }
+
+    me->handoff_buf_size = (uint32_t)global_handoff_buf_size;
+    me->handoff_samples  = calloc(me->handoff_buf_size, sizeof(uint64_t));
+    me->handoff_pos      = 0;
+    me->handoff_count    = 0;
+    if (!me->handoff_samples) {
+        fprintf(stderr, "Failed to allocate handoff sample buffer\n");
+        exit(EXIT_FAILURE);
+    }
     // Note: we were cleanly passing in num_threads before, but this now
     // relies on settings globals too much.
     if (settings.read_buf_mem_limit) {
@@ -510,6 +531,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
  */
 static void *worker_libevent(void *arg) {
     LIBEVENT_THREAD *me = arg;
+    tl_me = me;
 
     /* Any per-thread setup can happen here; memcached_thread_init() will block until
      * all threads have finished initializing.

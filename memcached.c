@@ -4264,6 +4264,36 @@ static void sig_usrhandler(const int sig) {
     stop_main_loop = GRACE_STOP;
 }
 
+/* SIGUSR2: dump per-thread lock hand-off latency ring buffers to binary files and reset.
+ * Each file contains a flat array of uint64_t values (rdtsc cycles from unlock to acquire).
+ * Output: handoff_samples_thread<N>.bin in the current working directory. */
+static void sig_handoff_dump(const int sig) {
+    char fname[64];
+    int dumped = 0;
+    for (int i = 0; i < settings.num_threads; i++) {
+        LIBEVENT_THREAD *t = get_worker_thread(i);
+        if (!t->handoff_samples || t->handoff_count == 0)
+            continue;
+        snprintf(fname, sizeof(fname), "handoff_samples_thread%d.bin", i);
+        FILE *f = fopen(fname, "wb");
+        if (!f)
+            continue;
+        if (t->handoff_count < t->handoff_buf_size) {
+            fwrite(t->handoff_samples, sizeof(uint64_t), t->handoff_count, f);
+        } else {
+            uint32_t start = t->handoff_pos;
+            fwrite(t->handoff_samples + start, sizeof(uint64_t),
+                   t->handoff_buf_size - start, f);
+            fwrite(t->handoff_samples, sizeof(uint64_t), start, f);
+        }
+        fclose(f);
+        t->handoff_pos   = 0;
+        t->handoff_count = 0;
+        dumped++;
+    }
+    fprintf(stderr, "[handoff] dumped %d thread(s) to handoff_samples_thread*.bin\n", dumped);
+}
+
 /*
  * On systems that supports multiple page sizes we may reduce the
  * number of TLB-misses by using the biggest available page size
@@ -4865,6 +4895,7 @@ int main (int argc, char **argv) {
     signal(SIGTERM, sig_handler);
     signal(SIGHUP, sighup_handler);
     signal(SIGUSR1, sig_usrhandler);
+    signal(SIGUSR2, sig_handoff_dump);
 
     /* init settings */
     settings_init();
