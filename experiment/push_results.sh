@@ -1,8 +1,10 @@
 #!/bin/bash
 # Usage:
 #   cd ~/Application/memcached
-#   bash experiment/push_results.sh                       # utdelay sweep 結果
-#   EXPERIMENT_TYPE=wait bash experiment/push_results.sh  # wait distribution 結果
+#   bash experiment/push_results.sh                          # utdelay sweep 結果
+#   EXPERIMENT_TYPE=wait bash experiment/push_results.sh     # wait distribution 結果
+#   EXPERIMENT_TYPE=futex bash experiment/push_results.sh    # futex sweep 結果
+#   EXPERIMENT_TYPE=handoff bash experiment/push_results.sh  # handoff latency 結果
 #
 # Description:
 #   CloudLab サーバ上での実験結果を GitHub にプッシュする。
@@ -91,6 +93,19 @@ stage_files() {
         echo "  staged $found file(s) for wait experiment"
         if [ "$found" -eq 0 ]; then
             echo "[ERROR] wait_summary.csv not found. extract_wait_stats.py を先に実行してください。" >&2
+            exit 1
+        fi
+    elif [ "$EXPERIMENT_TYPE" = "handoff" ]; then
+        # handoff: handoff_summary.csv / run_info.md のみ（.bin は除外）
+        local found=0
+        while IFS= read -r -d '' f; do
+            git add -f "$f"
+            found=$((found + 1))
+        done < <(find "$RESULT_DIR" -path "*/handoff_*" \
+            \( -name "handoff_summary.csv" -o -name "run_info.md" \) -print0)
+        echo "  staged $found file(s) for handoff experiment"
+        if [ "$found" -eq 0 ]; then
+            echo "[ERROR] handoff result files not found. run_handoff_sweep.sh + extract_handoff_stats.py を先に実行してください。" >&2
             exit 1
         fi
     elif [ "$EXPERIMENT_TYPE" = "futex" ]; then

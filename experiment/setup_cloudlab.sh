@@ -9,8 +9,9 @@
 #   - results ブランチを /users/Morisaki/memcached/ にクローン（実験スクリプト用）
 #   - memcached バイナリを3ブランチからビルドして /users/Morisaki/memcached/ に配置
 #       experiment/mysql-like-utdelay -> memcached  (utdelay計測用)
-#       master                        -> memcached_master  (baseline)
-#       debug/wait-time               -> memcached_wait_debug  (wait分布計測用)
+#       master                        -> memcached_master       (baseline)
+#       debug/wait-time               -> memcached_wait_debug   (wait分布計測用)
+#       debug/handoff-latency         -> memcached_handoff_debug (handoffレイテンシ計測用)
 #   - leverich/mutilate (standard + p999) のビルド
 #   - アーキテクチャ判定・ラッパースクリプト生成
 #
@@ -21,8 +22,9 @@
 # Output:
 #   /users/Morisaki/memcached/                   - results ブランチのクローン（実験作業ディレクトリ）
 #   /users/Morisaki/memcached/memcached          - utdelay バイナリ
-#   /users/Morisaki/memcached/memcached_master   - master バイナリ
-#   /users/Morisaki/memcached/memcached_wait_debug - wait-time バイナリ
+#   /users/Morisaki/memcached/memcached_master        - master バイナリ
+#   /users/Morisaki/memcached/memcached_wait_debug    - wait-time バイナリ
+#   /users/Morisaki/memcached/memcached_handoff_debug - handoff latency バイナリ
 #   /users/Morisaki/mutilate/mutilate            - mutilate バイナリ
 #   /users/Morisaki/mutilate/mutilate_p999       - p50+p999 対応バイナリ
 #   /users/Morisaki/run_utdelay_experiment.sh    - 実験実行用ラッパー
@@ -141,6 +143,27 @@ if [ -z "$SKIP_BUILD" ]; then
     fi
     cp "$WAIT_BUILD_DIR/memcached" "$MC_DIR/memcached_wait_debug"
     echo "  Built: $MC_DIR/memcached_wait_debug"
+    cd - >/dev/null
+
+    # debug/handoff-latency バイナリのビルド（handoff latency 実験用）
+    echo "  Building memcached_handoff_debug (debug/handoff-latency branch) ..."
+    HANDOFF_BUILD_DIR="${BASE_DIR}/memcached_handoff_src"
+    if [ -d "$HANDOFF_BUILD_DIR/.git" ]; then
+        git -C "$HANDOFF_BUILD_DIR" fetch origin debug/handoff-latency 2>&1 | tail -2 || true
+        git -C "$HANDOFF_BUILD_DIR" checkout debug/handoff-latency 2>&1 | tail -1 || true
+        git -C "$HANDOFF_BUILD_DIR" pull origin debug/handoff-latency 2>&1 | tail -2 || true
+    else
+        git clone --branch debug/handoff-latency "$MC_REPO" "$HANDOFF_BUILD_DIR"
+    fi
+    cd "$HANDOFF_BUILD_DIR"
+    ./autogen.sh 2>&1 | tail -3
+    ./configure 2>&1 | tail -5
+    make -j"$(nproc)" 2>&1 | tail -5
+    if [ ! -x "$HANDOFF_BUILD_DIR/memcached" ]; then
+        echo "[ERROR] memcached_handoff_debug build failed" >&2; exit 1
+    fi
+    cp "$HANDOFF_BUILD_DIR/memcached" "$MC_DIR/memcached_handoff_debug"
+    echo "  Built: $MC_DIR/memcached_handoff_debug"
     cd - >/dev/null
 fi
 echo "[2/4] Done."
