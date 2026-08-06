@@ -62,8 +62,16 @@ MC_CPUS="${MC_CPUS:-0-3}"
 WL_CPUS="${WL_CPUS:-4-7}"
 
 PERF_EVENT="syscalls:sys_enter_futex"
-# libtraceevent 対応の perf バイナリ（/usr/bin/perf は tracepoint 非対応の場合あり）
-PERF_BIN="${PERF_BIN:-/home/morisaki/linux/tools/perf/perf}"
+# perf バイナリ: 環境変数優先 → カスタムビルド → システム perf の順でフォールバック
+if [ -z "${PERF_BIN:-}" ]; then
+    if [ -x "/home/morisaki/linux/tools/perf/perf" ]; then
+        PERF_BIN="/home/morisaki/linux/tools/perf/perf"
+    elif command -v perf >/dev/null 2>&1; then
+        PERF_BIN="$(command -v perf)"
+    else
+        PERF_BIN="perf"
+    fi
+fi
 
 # ---- CPU 環境チェック ----
 check_perf_env() {

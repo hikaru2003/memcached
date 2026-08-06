@@ -6,7 +6,7 @@
 # Description:
 #   PAUSE_PER_ROUND（N）を sweep しながら perf stat で LLC cache miss 率を計測する。
 #   busの輻輳度合いを間接測定し、「PAUSEがbus輻輳を緩和 → ロック獲得時間改善」を実証する。
-#   Skylake 環境専用（mem_load_retired.l3_miss イベント使用）。
+#   アーキ非依存（offcore_requests.demand_rfo を使用）。
 #
 # Parameters (env vars):
 #   MEMCACHED_BIN          - utdelay バイナリ                (default: ./memcached)

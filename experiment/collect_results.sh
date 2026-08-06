@@ -34,7 +34,7 @@ echo "============================================================"
 
 # experiment/results/<arch>-<type>-YYYYMMDD ブランチを列挙
 branches=$(git branch -r \
-    | grep "${REMOTE}/experiment/results/.*-[a-z]*-[0-9]\{8\}" \
+    | grep "${REMOTE}/experiment/results/.*-[a-z_]*-[0-9]\{8\}" \
     | sed "s|.*${REMOTE}/||" \
     | tr -d ' ')
 

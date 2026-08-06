@@ -121,6 +121,19 @@ stage_files() {
             echo "[ERROR] futex result files not found. run_futex_sweep.sh を先に実行してください。" >&2
             exit 1
         fi
+    elif [ "$EXPERIMENT_TYPE" = "cache_miss" ]; then
+        # cache_miss: summary.csv / run_info.md のみ（raw/*.txt は除外）
+        local found=0
+        while IFS= read -r -d '' f; do
+            git add -f "$f"
+            found=$((found + 1))
+        done < <(find "$RESULT_DIR" -path "*/cache_miss_*" \
+            \( -name "summary.csv" -o -name "run_info.md" \) -print0)
+        echo "  staged $found file(s) for cache_miss experiment"
+        if [ "$found" -eq 0 ]; then
+            echo "[ERROR] cache_miss result files not found. run_cache_miss_sweep.sh を先に実行してください。" >&2
+            exit 1
+        fi
     else
         # utdelay: raw.csv / summary.md / run_info.md / raw/*.log
         local found=0
