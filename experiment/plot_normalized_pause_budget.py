@@ -42,14 +42,14 @@ PAUSE_CYC = {
     "broadwell":     10,
     "icelake":       39,
     "skylake_ann":   124,
-    "emeraldrapids": 37,  # 未測定(-O2)、旧来の推定値
+    "emeraldrapids": 22,
 }
 
 ARCH_INFO = {
     "broadwell":     {"label": "Broadwell   E5-2640v4  PAUSE~10cy  L3=25MB/socket", "color": "tab:blue"},
     "icelake":       {"label": "Sunny Cove  Silver4314 PAUSE~39cy  L3=24MB/socket", "color": "tab:orange"},
     "skylake_ann":   {"label": "Skylake     Silver4110 PAUSE~124cy L3=11MB",        "color": "tab:green"},
-    "emeraldrapids": {"label": "Emrld.Rapids Gold6554S PAUSE~37cy  L3=?MB",         "color": "tab:red"},
+    "emeraldrapids": {"label": "Emrld.Rapids Gold6554S PAUSE~22cy  L3=?MB",         "color": "tab:red"},
 }
 
 RAW_CSV = {

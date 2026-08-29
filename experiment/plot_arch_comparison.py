@@ -35,7 +35,7 @@ RESULTS_BASE = "experiment/results"
 
 ARCH_INFO = {
     "broadwell":     ("Broadwell (xl170, PAUSE~10cyc)",               "tab:blue"),
-    "emeraldrapids": ("Emerald Rapids (c6620, PAUSE~37cyc)",          "tab:green"),
+    "emeraldrapids": ("Emerald Rapids (c6620, PAUSE~22cyc)",          "tab:green"),
     "icelake":       ("Ice Lake (sm110, PAUSE~39cyc)",                "tab:orange"),
     "ivybridge":     ("Ivy Bridge (c8220, PAUSE~15cyc)",              "tab:red"),
     "skylake":       ("Skylake c220g5 (PAUSE~124cyc)",                "tab:purple"),

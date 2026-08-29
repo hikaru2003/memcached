@@ -15,7 +15,7 @@
 | Broadwell (xl170) | 10.05 cy |
 | Ice Lake (sm110) | 38.74 cy |
 | Skylake ann | 124.20 cy |
-| Emerald Rapids (c6620) | **未測定**（旧推定: ~37cy） |
+| Emerald Rapids (c6620) | **21.58 cy** |
 
 ---
 
