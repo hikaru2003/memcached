@@ -9,9 +9,9 @@
 #   collect_results.sh で収集した結果を前提とする。
 #
 # Output:
-#   experiment/results/wait_arch_p50.png   : p50 (median wait time) vs N
-#   experiment/results/wait_arch_p99.png   : p99 wait time vs N
-#   experiment/results/wait_arch_p999.png  : p99.9 wait time vs N
+#   experiment/results/wait_arch_p50.pdf   : p50 (median wait time) vs N
+#   experiment/results/wait_arch_p99.pdf   : p99 wait time vs N
+#   experiment/results/wait_arch_p999.pdf  : p99.9 wait time vs N
 #
 # Prerequisites:
 #   pip install matplotlib numpy
@@ -30,11 +30,11 @@ import numpy as np
 RESULTS_BASE = "experiment/results"
 
 ARCH_INFO = {
-    "broadwell":     ("Broadwell (xl170, PAUSE~12cyc)",                "tab:blue"),
+    "broadwell":     ("Broadwell (xl170, PAUSE~10cyc)",                "tab:blue"),
     "emeraldrapids": ("Emerald Rapids (c6620, PAUSE~37cyc)",           "tab:green"),
     "ivybridge":     ("Ivy Bridge (c8220, PAUSE~15cyc)",               "tab:red"),
-    "skylake":       ("Skylake c220g5 (PAUSE~142cyc)",                 "tab:purple"),
-    "skylake_ann":   ("Skylake ann (Xeon Silver 4114, PAUSE~142cyc)",  "tab:pink"),
+    "skylake":       ("Skylake c220g5 (PAUSE~124cyc)",                 "tab:purple"),
+    "skylake_ann":   ("Skylake ann (Xeon Silver 4110, PAUSE~124cyc)",  "tab:pink"),
 }
 
 COMMON_TITLE_SUFFIX = (
@@ -123,10 +123,10 @@ if __name__ == "__main__":
     print(f"\nGenerating plots ({len(datasets)} arch(es)) ...")
 
     plot_metric(datasets, "p50_us",  "Lock wait p50",  "Lock wait p50",
-                os.path.join(RESULTS_BASE, "wait_arch_p50.png"))
+                os.path.join(RESULTS_BASE, "wait_arch_p50.pdf"))
     plot_metric(datasets, "p99_us",  "Lock wait p99",  "Lock wait p99",
-                os.path.join(RESULTS_BASE, "wait_arch_p99.png"))
+                os.path.join(RESULTS_BASE, "wait_arch_p99.pdf"))
     plot_metric(datasets, "p999_us", "Lock wait p99.9", "Lock wait p99.9",
-                os.path.join(RESULTS_BASE, "wait_arch_p999.png"))
+                os.path.join(RESULTS_BASE, "wait_arch_p999.pdf"))
 
     print("\nDone.")

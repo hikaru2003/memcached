@@ -10,10 +10,10 @@
 #   raw.csv からエラーバー・レイテンシ統計を計算する。
 #
 # Output:
-#   experiment/results/utdelay_arch_qps.png        : 生QPS ± 1σ
-#   experiment/results/utdelay_arch_normalized.png : master比正規化QPS ± 1σ
-#   experiment/results/utdelay_arch_r_avg.png      : read avg latency ± 1σ
-#   experiment/results/utdelay_arch_r_p99.png      : read p99 latency ± 1σ
+#   experiment/results/utdelay_arch_qps.pdf        : 生QPS ± 1σ
+#   experiment/results/utdelay_arch_normalized.pdf : master比正規化QPS ± 1σ
+#   experiment/results/utdelay_arch_r_avg.pdf      : read avg latency ± 1σ
+#   experiment/results/utdelay_arch_r_p99.pdf      : read p99 latency ± 1σ
 #
 # Prerequisites:
 #   pip install matplotlib numpy
@@ -34,12 +34,12 @@ import numpy as np
 RESULTS_BASE = "experiment/results"
 
 ARCH_INFO = {
-    "broadwell":     ("Broadwell (xl170, PAUSE~12cyc)",           "tab:blue"),
-    "emeraldrapids": ("Emerald Rapids (c6620, PAUSE~37cyc)",      "tab:green"),
-    "icelake":       ("Ice Lake (sm110, PAUSE~39cyc)",             "tab:orange"),
-    "ivybridge":     ("Ivy Bridge (c8220, PAUSE~15cyc)",          "tab:red"),
-    "skylake":       ("Skylake c220g5 (PAUSE~142cyc)",            "tab:purple"),
-    "skylake_ann":   ("Skylake ann (Xeon Silver 4114, PAUSE~142cyc)", "tab:pink"),
+    "broadwell":     ("Broadwell (xl170, PAUSE~10cyc)",               "tab:blue"),
+    "emeraldrapids": ("Emerald Rapids (c6620, PAUSE~37cyc)",          "tab:green"),
+    "icelake":       ("Ice Lake (sm110, PAUSE~39cyc)",                "tab:orange"),
+    "ivybridge":     ("Ivy Bridge (c8220, PAUSE~15cyc)",              "tab:red"),
+    "skylake":       ("Skylake c220g5 (PAUSE~124cyc)",                "tab:purple"),
+    "skylake_ann":   ("Skylake ann (Xeon Silver 4110, PAUSE~124cyc)", "tab:pink"),
 }
 
 # annサーバの結果（arch サブディレクトリ構造外のため個別指定）
@@ -333,16 +333,16 @@ if __name__ == "__main__":
 
     print("\nGenerating plots...")
     plot_qps(datasets,
-             os.path.join(RESULTS_BASE, "utdelay_arch_qps.png"))
+             os.path.join(RESULTS_BASE, "utdelay_arch_qps.pdf"))
     plot_normalized(datasets,
-                    os.path.join(RESULTS_BASE, "utdelay_arch_normalized.png"))
+                    os.path.join(RESULTS_BASE, "utdelay_arch_normalized.pdf"))
     plot_latency(datasets, "mean_r_avg", "sd_r_avg",
                  "Read avg latency (us)",
                  "Read avg latency vs pause_per_round",
-                 os.path.join(RESULTS_BASE, "utdelay_arch_r_avg.png"))
+                 os.path.join(RESULTS_BASE, "utdelay_arch_r_avg.pdf"))
     plot_latency(datasets, "mean_r_p99", "sd_r_p99",
                  "Read p99 latency (us)",
                  "Read p99 latency vs pause_per_round",
-                 os.path.join(RESULTS_BASE, "utdelay_arch_r_p99.png"))
+                 os.path.join(RESULTS_BASE, "utdelay_arch_r_p99.pdf"))
 
     print("\nDone.")

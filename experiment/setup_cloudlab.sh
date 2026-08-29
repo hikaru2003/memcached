@@ -276,15 +276,15 @@ cpu_model=$(grep "^model name" /proc/cpuinfo | head -1 | cut -d: -f2 | sed 's/^ 
 echo "  CPU model  : $cpu_model"
 
 # アーキテクチャ判定
-# PAUSE実測値（simple_mysql実験 result/2026_6_3/README.md より）:
-#   Ivy Bridge≈15cyc, Broadwell≈12cyc, Skylake≈142cyc, IceLake≈39cyc, Emerald≈37cyc
+# PAUSE実測値（-O2コンパイル、pause_cycle_count.c 実測）:
+#   Ivy Bridge≈15cyc, Broadwell≈10cyc, Skylake≈124cyc, IceLake≈39cyc, Emerald≈37cyc(推定)
 # CloudLab hardware type → CPU model の対応:
 #   c8220(Ivy): Xeon E5-2650 v2  /  xl170(Broadwell): Xeon E5-2640 v4
 #   c220g5(Skylake): Xeon Silver 4114  /  sm110(IceLake): Xeon Gold 6338
 #   c6620(Emerald): Xeon Gold 6554S
 if echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v4|E7-.*v4|broadwell"; then
     ARCH_NAME="broadwell"
-    PAUSE_NOTE="Broadwell(xl170): PAUSE~12cyc"
+    PAUSE_NOTE="Broadwell(xl170): PAUSE~10cyc"
 elif echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v2|E7-.*v2|E3-.*v2"; then
     ARCH_NAME="ivybridge"
     PAUSE_NOTE="Ivy Bridge(c8220): PAUSE~15cyc"
@@ -296,7 +296,7 @@ elif echo "$cpu_model" | grep -qiE "6338|6348|6354|Silver 4[3-9][0-9]{2}|ice lak
     PAUSE_NOTE="Ice Lake(sm110): PAUSE~39cyc"
 elif echo "$cpu_model" | grep -qiE "Silver 4114|Silver 41[0-9]{2}|Gold 5[12][0-9]{2}|skylake"; then
     ARCH_NAME="skylake"
-    PAUSE_NOTE="Skylake(c220g5): PAUSE~142cyc"
+    PAUSE_NOTE="Skylake(c220g5): PAUSE~124cyc"
 else
     ARCH_NAME="unknown"
     PAUSE_NOTE="Unknown arch -- PAUSE cycles unknown, verify manually"

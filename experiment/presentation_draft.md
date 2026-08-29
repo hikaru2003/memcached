@@ -1,202 +1,222 @@
 # 中間発表 — 発表内容ドラフト
 
-## タイトル
+## スライド1: タイトル
 
 マイクロアーキテクチャを考慮したスピン待機のPAUSE命令最適化
 
 ---
 
-## スライド2: 背景① — ロック競合とspin-wait
+## スライド2: データセンタの現状 — 混合アーキテクチャと同一設定の問題
 
-マルチコア環境では、複数スレッドが共有資源（バッファ、ログ等）に同時アクセスする際にロック競合が不可避となる。競合時の待機戦略には大きく2つある。
+**主張：データセンタでは異なるマイクロアーキテクチャが混在しているが、アプリケーションはアーキテクチャの違いを考慮せず同一設定で動作しており、性能を最大化できていない**
 
-**OS wait（futex）**
-- カーネルに制御を渡してスレッドをスリープさせる
-- wake-up レイテンシが ~数μs（スケジューラの粒度に依存）
-- ロック保持時間がそれより短ければオーバーヘッドが支配的になる
+- データセンタでは複数世代のCPUアーキテクチャが混在して稼働している
+- しかし、実際に動くアプリケーションはアーキテクチャの違いを考慮せず同一の設定を使用する
+- → アーキテクチャ固有の特性を活かせず、性能を最大化できていない
 
-**spin-wait（ビジーウェイト）**
-- ロックが解放されるまでポーリングを繰り返す
-- wake-up レイテンシがなく、短時間競合には高効率
-- ただし解放を見逃さないためCPUを占有し続ける
-
-現代のロック実装では **「まずspinで待ち、タイムアウト後にOS waitへ移行」する2段階方式** が標準となっている（MySQL InnoDB、Linux pthread adaptive mutex 等）。
+本研究はその中でも特に **PAUSE命令** に着目する。
 
 ---
 
-## スライド3: 背景② — tight spinの問題とPAUSE命令の役割
+## スライド3: PAUSE命令 — スピンロックに広く使われるアーキテクチャ依存の命令
 
-単純なtight spinループ（`while (!trylock());`）には以下の問題がある。
+**主張：PAUSE命令はスピンロックに広く使われているが、実行サイクル数がアーキテクチャによって最大7倍以上異なる**
 
-**問題①: Memory Order Buffer (MOB) の誤フラッシュ**
-ロック変数の繰り返しロードは、プロセッサがメモリ順序違反を誤検出してパイプラインフラッシュを引き起こす。
-
-**問題②: キャッシュコヒーレンストラフィックの増大**
-すべてのコアが同一キャッシュラインを読み続けることでバスに大量のコヒーレンスメッセージが発生し、ロックホルダーのコアも影響を受ける。
-
-これを解決するのが **x86 PAUSE命令**（`rep; nop`）だ。Intel SDM は spin-wait loop 内での PAUSE 使用を明示的に推奨しており、以下の効果がある：
-
-- パイプラインに「spin中」というヒントを与え MOB フラッシュを抑制
-- ロードリピート間隔を広げ、コヒーレンストラフィックを削減
-- HT sibling コアへの干渉を緩和
-
-**主要OSS実装での採用：**
+PAUSE命令はプロセッサに対してスピン中であることを伝えるヒントであり、消費電力を削減する効果もある。スピンロックに PAUSE を挿入することは Linux kernel・glibc・MySQL・memcached など主要な実装で広く採用されている。
 
 | 実装 | PAUSE の使われ方 |
 |---|---|
-| Linux kernel | `cpu_relax()` = PAUSE、全スピンロックで使用 |
-| MySQL InnoDB | `ut_delay(delay × multiplier)` 内で `UT_RELAX_CPU()` = PAUSE |
+| Linux kernel | `cpu_relax()` = PAUSE、スピンロックで使用 |
 | glibc pthread | adaptive mutex のスピンフェーズ |
-| memcached | `pthread_mutex` スピンパス |
+| MySQL InnoDB | `ut_delay()` 内で PAUSE を実行 |
+| memcached | スピンロックのスピンフェーズ |
+
+しかし、PAUSE の実行サイクル数はアーキテクチャによって大きく異なる。
+
+| マイクロアーキテクチャ | PAUSE実行サイクル数（-O2実測） |
+|---|---|
+| Broadwell   | ~10 cy |
+| **Skylake** | **~124 cy** |
+| Ice Lake    | ~39 cy |
+| Raptor Cove | 未測定 |
+
+Skylake は Broadwell の約 **12倍** の実行サイクル数を消費する。
+
+---
+
+## スライド4: スピンロックの仕組み
+
+**主張：スピンロックはロック獲得を繰り返し試み、取得できなければPAUSEを挿入しながらスピンし、それでも取得できなければスリープに移行する**
+
+**【図】2パネル構成**
+
+パネル①（競合状態）
+- 🔒（施錠）と 📦（共有資源）をスライド中央に配置
+- Thread 1：🔒 → ✓ → 📦 クリティカルセクション実行中
+- Thread 2：🔒 → ✗ → 🔄 PAUSE × N（スピン中）
+- Thread 3：🔒 → ✗ → 💤 スリープ中（スピンで取れなかった）
+
+パネル②（ロック解放後）
+- Thread 1：📦 処理完了 → 🔓 ロック解放
+- Thread 2：スピン中に解放を検出 → 🔒 ✓ → 📦 クリティカルセクション獲得
+- Thread 3：スリープから起床 → 再度 trylock へ
+
+---
+
+## スライド5: スピンにより性能が改善するが、改善率はアーキテクチャごとに異なる
+
+**主張：スピンすることで性能は改善するが、アーキテクチャによって改善率が大きく異なり、最適なPAUSE挿入回数もアーキテクチャごとに違う**
+
+**【グラフ】スピンなし(N=0) vs 各アーキテクチャの最適N でのQPS比較**
+（Broadwell / Skylake / Ice Lake の3アーキテクチャを並置）
+
+**【表】PAUSE実行サイクル数（再掲）**
+
+- スピンを導入することでスループットは改善する
+- しかし、改善率はアーキテクチャによって異なる
+- → PAUSEサイクル数が大きく異なるため、最適なPAUSE挿入回数もアーキテクチャごとに異なると考えられる
+
+---
+
+## スライド6: 検証の目標と今後の課題
+
+**主張：最適なPAUSE挿入回数がアーキテクチャごとにどう異なるかを分析し、その理由を解明することを目標とする**
+
+- **現時点の目標**：最適なPAUSE挿入回数がアーキテクチャごとにどう異なるかを実測で分析する
+- この時点では最適な挿入回数は特定されていない
+- 続くスライドでスループットが山形になる理由として **2つの仮説** を提示する
+- **今後の課題**：仮説を検証し、アーキテクチャの特性（PAUSEサイクル数等）から最適な挿入回数を実験なしで特定できる手法を確立する
+
+---
+
+## スライド11: 実験設定
+
+**主張：アーキテクチャごとに最適なPAUSE挿入回数が存在することをmemcachedで実測検証する**
+
+**目的**
+PAUSE実行サイクル数がアーキテクチャ間で最大12倍異なるため、同一のPAUSE挿入回数設定ではスピンコストが乖離するという仮説を検証する
+
+**ワークロード**
+- Memcached（実装は次のスライド）
+
+**実験環境**
+- サーバ：Broadwell / Skylake / Ice Lake（Sunny Cove）
+- mutilate：単一キーへのリクエスト（SET 50% / GET 50%）でロック競合を最大化
+- PAUSE実行回数/スピン N を 0〜200 の範囲で変化させる
+
+**比較対象**
+- アーキテクチャ間：同一N値を適用した場合の性能差
+- アーキテクチャ内：N値変化に対するQPS・レイテンシ・スピン滞在時間の推移
+
+---
+
+## スライド11b: 実装 — memcachedへのPAUSEスピンの導入
+
+**主張：デフォルトのmemcachedはロック取得失敗時に即座にOS waitへ落ちるため、MySQLのut_delay戦略を参考にPAUSEスピンを挿入した**
+
+**デフォルトのmemcachedのロック取得**
+`pthread_mutex_lock` を呼ぶだけ → 取得失敗時は即座にfutex（OS wait）へ移行
+
+**変更後の実装（MySQLのut_delay戦略を参考）**
 
 ```c
-// MySQL: storage/innobase/ut/ut0ut.cc
-unsigned long ut_delay(unsigned long delay) {
-    for (unsigned long i = 0; i < delay * srv_spin_wait_pause_multiplier; i++) {
-        UT_RELAX_CPU();  // = rep; nop = PAUSE命令
-        j += i;
+void spinlock_lock(lock) {
+    for (round = 0; round < spin_rounds; round++) {  // 30ラウンド固定
+        if (trylock(lock) == SUCCESS)
+            return;
+        for (p = 0; p < N; p++)
+            PAUSE();               // PAUSE命令 × N回
     }
+    OS_wait(lock);                 // futex fallback
 }
 ```
 
----
-
-## スライド4: 問題提起 — PAUSEレイテンシはアーキテクチャ依存なのに設定は固定
-
-PAUSE命令のレイテンシはマイクロアーキテクチャによって大きく異なる。
-
-| アーキテクチャ | PAUSE レイテンシ | multiplier デフォルト |
-|---|---|---|
-| Ivy Bridge (c8220) | ~15 cy | 50（固定） |
-| Broadwell (xl170) | ~12 cy | 50（固定） |
-| Skylake (c220g5 / ann) | **~140 cy** | 50（固定） |
-| Ice Lake (sm110) | ~50 cy | 50（固定） |
-| Emerald Rapids (c6620) | ~37 cy | 50（固定） |
-
-MySQLの `innodb_spin_wait_pause_multiplier`（デフォルト=50）は全アーキテクチャで共通設定だ。
-Skylake では 1 spin iteration あたり `50 × 140cy = 7,000cy ≈ 2.5μs` を消費するのに対し、
-Broadwell では `50 × 12cy = 600cy ≈ 0.2μs` に過ぎない。
-**同じ設定でも実際のスピンコストは12倍異なる。**
-
-→ **アーキテクチャごとに最適なPAUSE回数があるはず**、という仮説を立て、実験で検証した。
+- `spin_rounds`：trylock試行回数（固定30回）
+- `N`（= `pause_per_round`）：1試行あたりのPAUSE実行回数（実験変数）
+- N=0 はPAUSEなしのtight spinに相当し、デフォルト設定に近い
 
 ---
 
-## スライド5: 実験① — simple_spinlock: 最適multiplierはアーキテクチャ依存
+## スライド12: 結果 — スループット
 
-MySQLの `ut_delay` を模倣した最小スピンロック実装（`simple_spinlock.c`）を用いて、
-PAUSE回数（multiplier）とスループットの関係をアーキテクチャ別に計測した。
+**主張：PAUSE挿入回数とスループットの関係は山形を示し、最適点はアーキテクチャごとに異なる**
 
-**実験設定：**
-- スレッド数：8 / 16 / 32
-- multiplier：0 〜 50,000
-- クリティカルセクション長（work_ns）：0 / 100 / 500 / 1000 / 2000 / 5000 ns
-- 計測：スループット（ロック取得回数/秒）
+**図: `experiment/results/plots/v2/qps_comparison.pdf`**
 
-**図: `simple_mysql/result/per_server/skylake_ann_throughput_grouped.png`**
-**図: `simple_mysql/result/per_server/emerald_c6620_throughput_grouped.png`**
-**図: `simple_mysql/result/per_server/broadwell_xl170_throughput_grouped.png`**
+1. **PAUSEサイクル数が大きいアーキテクチャほど、少ない挿入回数で最大スループットに到達する**
+   - Skylake（~156cy）: 最も少ないNでピーク → N増加とともに急落
+   - Ice Lake（~53cy）: Skylakeよりやや大きいNでピーク
+   - Broadwell（~22cy）: 最も大きいNでピーク → 高NでもQPS維持
 
-**観察：**
-- **Skylake ann（PAUSE ~142cy）**: ピークが低いmultiplier（数十〜数百）に現れ、それ以上では急落。PAUSEが重いため大量のPAUSEはスピンコストを過大にする。
-- **Emerald Rapids（PAUSE ~37cy）**: ピークがより高いmultiplier（数百〜数千）に現れ、緩やかに最適値へ向かう。PAUSEが軽いため多くのPAUSEを積んでもスループットが維持できる。
-- **Broadwell（PAUSE ~12cy）**: Emerald Rapidsと同様、高multiplierまで耐性がある。
-
-→ **最適なmultiplierはアーキテクチャのPAUSEレイテンシに逆比例する。**
-PAUSEが重いSkylakeほど少ないPAUSEが最適になる。
+2. **挿入回数を増やすにつれてスループットは改善するが、過剰な挿入で徐々に悪化する（山形）**
+   - N=0（PAUSE なし）: tight spinによりCPUリソースを無駄に消費
+   - 最適N付近: ロック競合が適切に緩和されスループット最大
+   - N過剰: スピンコストがロック保持時間を上回り、スループット低下
 
 ---
 
-## スライド6: 実験② — memcached: 同様の傾向を実際のキャッシュサーバで確認
+## スライド13: 考察 — スループットが山形を示す理由
 
-実際のワークロードとしてmemcachedを用い、スピン待機のPAUSE回数（pause_per_round）を
-変化させたときのレイテンシとQPSをアーキテクチャ別に計測した。
+**主張：ピークの左側ではPAUSEを増やすほど、右側ではPAUSEを減らすほどスループットが改善する**
 
-**実験設定：**
-- ベンチマーク：mutilate（mc=4t, T4, c1, d32）
-- pause_per_round (N)：0 / 2 / 4 / 10 / 30 / 100 / 200
+**【図】** `experiment/results/plots/v2/qps_comparison.pdf`（ピーク左右に矢印を付記）
 
-**図: `experiment/results/utdelay_arch_r_boxplot.png`**
+**左側（N小 → ピーク方向）：PAUSEを増やすとスループットが改善する**
 
-**観察：**
-- **Skylake ann（PAUSE ~142cy）**: N=0〜2付近でレイテンシ最小。N=100以降で劣化が著しい（p99が300μs超）。
-- **Broadwell（PAUSE ~12cy）**: N=30付近が最適。N=200でも大きな劣化なし。
-- **Emerald Rapids（PAUSE ~37cy）**: N=30前後が最適。Skylakeより高いNに耐性がある。
+- ロック変数へのアクセス頻度が下がり、バス競合が緩和される
+- スリープへの移行頻度が下がり、wake-upコストが減少する
 
-**図: `experiment/results/utdelay_arch_normalized.png`**
+**右側（N大 → ピーク方向）：PAUSEを減らすとスループットが改善する**
 
-**観察：**
-- Skylake ann は N=0からすでにQPSが低く、N増加とともに急落する唯一のアーキテクチャ。
-- Broadwell / Emerald / Ivy Bridge は N=25〜50付近でQPSが最大になり、その後緩やかに低下。
-- **アーキテクチャごとに最適なNが明確に異なる**ことが示された。
-
-simple_spinlockと同じ傾向：**PAUSEが重いSkylakeほど少ないPAUSEが最適。**
+- ロック解放への応答が速くなる
+- スピンコストが下がり、スピン中のロック獲得率が上がる
 
 ---
 
-## スライド7: MySQL実験 — 実際のDBで検証を試みたが大幅改善が得られなかった
+## スライド15: 今後の課題：スループットが山形となるメカニズムの解明
 
-simple_spinlock / memcached で得られた知見（「Skylakeでは少ないPAUSEが最適」）を
-MySQL InnoDBで検証した。`innodb_spin_wait_pause_multiplier` を 0〜100 の範囲でスイープし、
-TPSへの影響を計測した。
+**主張：山形が生じるメカニズムとして2つの仮説を立てた**
 
-**実験設定：**
-- サーバ：Skylake-c220g5（PAUSE ~140cy）
-- ワークロード：sysbench oltp_read_write（tables=8, size=100K）
-- スレッド数：8
-- multiplier：0, 5, 10, 25, 50（default）, 75, 100
+**【図】** `experiment/results/plots/v2/qps_comparison.pdf`
 
-**図: `mysql-workspace/experiments/results/large-multiplier/skylake_c220g5_tps_vs_multiplier.png`**
+山形となるメカニズムを説明するために、以下の2つの仮説を立てた。
 
-**観察：**
-- multiplierを0〜100まで変化させてもTPSの変化は誤差範囲内（±3%程度）
-- simple_spinlock / memcachedで見られた「低multiplierで改善」という傾向が現れない
-- **グローバルなmultiplier変更ではMySQL全体のTPSを大幅に改善できなかった**
-
-※ 実験環境（コア数・sysbench配置）に問題がある可能性があり、再実験が必要。
+- **仮説①：** ロック変数への競合増大と応答遅延のトレードオフが山形を引き起こす
+- **仮説②：** スピン中のロック獲得確率とスリープ移行コストのバランスが山形を引き起こす
 
 ---
 
-## スライド8: なぜ改善しなかったのか — ロックごとに最適な待機戦略が異なる（今後の課題）
-
-MySQLでmultiplierを変えても改善しなかった理由を調査するために、
-performance_schema から各ロックの取得回数・平均待機時間を計測した。
-
-**図: `mysql-workspace/experiments/results/baseline/lock_characteristics.png`**
-
-**観察：**
-取得回数・平均待機時間ともに **桁違いの差** がある。
-
-| ロック | 取得回数/run | 平均待機時間 | 特性 |
-|---|---|---|---|
-| `log_files_mutex` | 5,700 | 0.69 ms | 長待ち・低頻度 |
-| `log_writer_mutex` | 11,600 | 0.18 ms | 長待ち・低頻度 |
-| `lock_sys_page_mutex` | 1,200,000 | 0.003 ms | 中間 |
-| `hash_table_locks` | 17,900,000 | 0.0002 ms | 超短待ち・高頻度 |
-| `trx_mutex` | 30,800,000 | 0.0001 ms | 超短待ち・高頻度 |
-
-これらすべてが **同一の `ut_delay` メカニズム**（同一の `multiplier`）で制御されている。
-
-**問題の本質：**
-あるロックにとって最適なmultiplier（小さい値）は、別のロックにとって最悪の設定になる可能性がある。
-グローバルにmultiplierを下げると一部のロックは改善するが別のロックは悪化し、
-結果として全体TPSへの影響が打ち消し合う。
-
-→ **ロック種別ごとに独立したPAUSE制御が必要**というのが今後の課題。
-
----
-
-## スライド9: まとめと今後の課題
+## スライド16: まとめ
 
 **得られた知見：**
 
-1. PAUSEレイテンシはアーキテクチャ依存（Broadwell ~12cy vs Skylake ~140cy）
-2. **simple_spinlock / memcached**: 最適なPAUSE回数はアーキテクチャごとに異なることを確認。Skylakeでは少ないPAUSEが最適。
-3. **MySQL**: グローバルなmultiplier変更ではTPSへの有意な改善が見られなかった。
+1. PAUSE実行サイクル数はアーキテクチャ依存（Broadwell ~12cy vs Skylake ~140cy、最大12倍）
+2. PAUSE挿入回数の最適値もアーキテクチャ依存
+   - memcachedのQPS・レイテンシ、スピン内滞在時間の両方で一貫した傾向を確認
+   - PAUSE実行サイクル数が高いSkylakeほど少ないPAUSE回数が最適
+3. 現行の固定設定ではスピンコストがアーキテクチャ間で最大12倍乖離
 
-**今後の課題：**
+**今後の方向性：**
+PMC・OSカーネルメトリクス（キャッシュコヒーレンストラフィック、futex回数）を計測し、
+PAUSEがどのメカニズムでパフォーマンスに影響するかを定量的に解明する。
 
-- MySQL実験環境の整備と再計測（コア数・sysbench配置の見直し）
-- 「なぜ改善しないか」の仮説（ロックごとに最適戦略が逆）の定量的検証
-- ロック種別ごとのPAUSE制御メカニズムの設計・実装
-- より多くのアーキテクチャへの拡張（ARM系との比較等）
+---
+
+## 関連研究
+
+**Protego [Cho+, NSDI'23]**
+ロック競合による性能崩壊を防ぐオーバーロードコントロールを提案。
+受け付けるリクエスト数の調整とSLOを達成できないリクエストをキューからドロップする。
+本研究はスピンループそのものの待機戦略（PAUSE回数）に着目しており、競合を回避するのではなくスピン効率を高める。
+
+**Atropos [Hu+, SOSP'25]**
+PMCでリクエストごとのリソース消費を監視し、リソース過負荷を引き起こす原因リクエストを特定してキャンセルする。
+本研究もPMCを活用するが、目的はPAUSEスピンがパフォーマンスに与えるメカニズムの解明であり、ランタイム制御ではなくスピンパラメータの最適化に用いる。
+
+**vSMT-IO [Jia+, ATC'20]**
+SMT環境でI/Oイベント待機中に発生するPAUSEビジーループとコンテキストスイッチの非効率をMONITOR/MWAITによるContext Retentionで排除する。
+ビジーループにPAUSE命令を用いる点は共通するが、vSMT-IOはI/Oイベント待機中のスピンを対象としスピン自体を排除する。本研究はロック獲得待機中のPAUSEスピンを対象とし、マイクロアーキテクチャに応じた回数に最適化する。
+
+**Tales of the Tail [Li+, SoCC'14]**
+Memcachedを含む複数サーバでテールレイテンシの発生源をハードウェア・OS・アプリケーション層で実測分析し、ロック競合・NUMA効果・CPU電源管理などを原因として特定した。
+診断にとどまりPAUSE回数の最適化には踏み込んでいない。本研究はその「どう解決するか」に対応する。

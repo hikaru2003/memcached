@@ -7,7 +7,7 @@
 #   RESULT_DIR: 結果ディレクトリ（raw.csv が存在すること）
 #
 # Output:
-#   experiment/results/p999_sweep.png
+#   experiment/results/p999_sweep.pdf
 #
 # Prerequisites:
 #   pip install matplotlib numpy
@@ -22,7 +22,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 RESULT_DIR = "experiment/results/utdelay_p999_20260702_112351"
-OUT_PATH   = "experiment/results/p999_sweep.png"
+OUT_PATH   = "experiment/results/p999_sweep.pdf"
 
 TITLE_SUFFIX = (
     "spinlock: [PAUSE×N → trylock] × SPIN_ROUNDS=30 → mutex_lock\n"

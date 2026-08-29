@@ -14,7 +14,7 @@
 #   --bins N        PDF用ヒストグラムbin数（デフォルト: 200）
 #
 # Output:
-#   <DIR>/wait_distribution.png  — 全条件のCDF比較グラフ + 各条件のPDF
+#   <DIR>/wait_distribution.pdf  — 全条件のCDF比較グラフ + 各条件のPDF
 #
 # Prerequisites:
 #   pip install numpy matplotlib
@@ -144,7 +144,7 @@ def main():
     )
     plt.tight_layout()
 
-    out = os.path.join(args.dir, "wait_distribution.png")
+    out = os.path.join(args.dir, "wait_distribution.pdf")
     fig.savefig(out, dpi=150)
     print(f"Saved: {out}", file=sys.stderr)
 

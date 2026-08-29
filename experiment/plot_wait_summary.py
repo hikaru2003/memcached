@@ -7,10 +7,10 @@
 # Parameters:
 #   --dir DIR       wait_dist 実験結果ディレクトリ
 #   --tsc-mhz MHZ  TSC周波数MHz（省略で /proc/cpuinfo から自動取得）
-#   --out PATH     出力画像パス（省略で <DIR>/wait_summary.png）
+#   --out PATH     出力画像パス（省略で <DIR>/wait_summary.pdf）
 #
 # Output:
-#   wait_summary.png — QPS・median/p99/p999 wait time の N 別比較グラフ
+#   wait_summary.pdf — QPS・median/p99/p999 wait time の N 別比較グラフ
 #
 # Prerequisites:
 #   pip install numpy matplotlib
@@ -202,7 +202,7 @@ def main():
         fontsize=11, y=0.98
     )
 
-    out = args.out or os.path.join(args.dir, "wait_summary.png")
+    out = args.out or os.path.join(args.dir, "wait_summary.pdf")
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print(f"Saved: {out}", file=sys.stderr)
 

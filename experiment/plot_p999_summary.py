@@ -7,10 +7,10 @@
 #
 # Parameters:
 #   --dir DIR   p999 sweep 実験結果ディレクトリ（raw.csv が存在すること）
-#   --out PATH  出力画像パス（省略で <DIR>/p999_summary.png）
+#   --out PATH  出力画像パス（省略で <DIR>/p999_summary.pdf）
 #
 # Output:
-#   p999_summary.png — QPS（上段）・p99/p99.9 レスポンスレイテンシ（下段）の N 別比較
+#   p999_summary.pdf — QPS（上段）・p99/p99.9 レスポンスレイテンシ（下段）の N 別比較
 #
 # Prerequisites:
 #   pip install numpy matplotlib
@@ -157,7 +157,7 @@ def main():
         fontsize=11, y=0.98
     )
 
-    out = args.out or os.path.join(args.dir, "p999_summary.png")
+    out = args.out or os.path.join(args.dir, "p999_summary.pdf")
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print(f"Saved: {out}")
 

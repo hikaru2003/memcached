@@ -14,7 +14,7 @@
 #   EXTRA_RAW_DIRS : arch名 -> rawディレクトリパス（arch別ディレクトリ外のデータ用）
 #
 # Output:
-#   experiment/results/utdelay_arch_r_boxplot.png
+#   experiment/results/utdelay_arch_r_boxplot.pdf
 #
 # Prerequisites:
 #   pip install matplotlib numpy
@@ -32,9 +32,9 @@ import matplotlib.patches as mpatches
 RESULTS_BASE = "experiment/results"
 
 ARCH_INFO = {
-    "broadwell":     ("Broadwell (xl170, PAUSE~12cyc)",                "tab:blue"),
+    "broadwell":     ("Broadwell (xl170, PAUSE~10cyc)",                "tab:blue"),
     "emeraldrapids": ("Emerald Rapids (c6620, PAUSE~37cyc)",           "tab:green"),
-    "skylake_ann":   ("Skylake ann (Xeon Silver 4114, PAUSE~142cyc)",  "tab:pink"),
+    "skylake_ann":   ("Skylake ann (Xeon Silver 4110, PAUSE~124cyc)",  "tab:pink"),
 }
 
 # arch別ディレクトリ外のデータ（rawディレクトリパスを直接指定）
@@ -273,6 +273,6 @@ if __name__ == "__main__":
         exit(1)
 
     print("\nGenerating plot...")
-    plot_boxplot(datasets, os.path.join(RESULTS_BASE, "utdelay_arch_r_boxplot.png"))
+    plot_boxplot(datasets, os.path.join(RESULTS_BASE, "utdelay_arch_r_boxplot.pdf"))
 
     print("\nDone.")

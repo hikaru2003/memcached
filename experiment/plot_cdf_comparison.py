@@ -3,9 +3,9 @@
 # パラメータ:
 #   --data-dir: raw/*.log を含むディレクトリ
 #               (default: experiment/results/skylake/utdelay_sweep_c220g5_skylake/raw)
-#   --output:   出力ファイルパス (default: experiment/results/cdf_latency_skylake.png)
+#   --output:   出力ファイルパス (default: experiment/results/cdf_latency_skylake.pdf)
 #   --labels:   比較するN値のリスト (default: master 0 4 10 100 200)
-# 出力先: experiment/results/cdf_latency_skylake.png
+# 出力先: experiment/results/cdf_latency_skylake.pdf
 # 前提条件: matplotlib, numpy がインストール済み
 #           mutilate logファイルが raw/ 以下に run_N{N}_{run}.log / run_master_{run}.log で存在すること
 
@@ -148,7 +148,7 @@ def main():
     )
     parser.add_argument(
         "--output",
-        default="experiment/results/cdf_latency_skylake.png",
+        default="experiment/results/cdf_latency_skylake.pdf",
         help="Output PNG path"
     )
     parser.add_argument(

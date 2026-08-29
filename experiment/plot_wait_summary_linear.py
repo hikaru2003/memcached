@@ -7,10 +7,10 @@
 # Parameters:
 #   --dir DIR      wait_dist 実験結果ディレクトリ
 #   --tsc-mhz MHZ TSC周波数 MHz（省略で /proc/cpuinfo から自動取得）
-#   --out PATH     出力画像パス（省略で <DIR>/wait_summary_linear.png）
+#   --out PATH     出力画像パス（省略で <DIR>/wait_summary_linear.pdf）
 #
 # Output:
-#   wait_summary_linear.png — wait_summary.png と同内容だが横軸を N の実際の値に揃えたグラフ
+#   wait_summary_linear.pdf — wait_summary.pdf と同内容だが横軸を N の実際の値に揃えたグラフ
 #
 # Prerequisites:
 #   pip install numpy matplotlib
@@ -194,7 +194,7 @@ def main():
         fontsize=11, y=0.98
     )
 
-    out = args.out or os.path.join(args.dir, "wait_summary_linear.png")
+    out = args.out or os.path.join(args.dir, "wait_summary_linear.pdf")
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print(f"Saved: {out}", file=sys.stderr)
 

@@ -11,7 +11,7 @@
 #     （pause-spinlock ブランチの pause_d32_mc4_mut4_run3/get50_set50/raw.csv から抽出）
 #
 # Output:
-#   experiment/results/pause_spinlock_skylake_ann_qps.png : 生QPS ± 1σ
+#   experiment/results/pause_spinlock_skylake_ann_qps.pdf : 生QPS ± 1σ
 #
 # Prerequisites:
 #   pip install matplotlib numpy
@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 
 RESULTS_BASE  = "experiment/results"
 DATA_DIR      = os.path.join(RESULTS_BASE, "pause_spinlock_skylake_ann")
-OUT_QPS       = os.path.join(RESULTS_BASE, "pause_spinlock_skylake_ann_qps.png")
+OUT_QPS       = os.path.join(RESULTS_BASE, "pause_spinlock_skylake_ann_qps.pdf")
 
 TITLE_SUFFIX  = (
     "spinlock: [trylock → PAUSE×1] × N → mutex_lock\n"
