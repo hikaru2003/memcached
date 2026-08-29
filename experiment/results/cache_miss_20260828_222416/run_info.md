@@ -1,0 +1,14 @@
+# Run info (cache miss sweep)
+- date: 2026-08-28 22:24:16
+- commit: 39f5af66
+- branch: results
+- utdelay_bin: ./memcached
+- master_bin:  ./memcached_master
+- mutilate_bin: ../mutilate/mutilate_p999
+- perf_events: cache-misses,LLC-load-misses,offcore_requests.demand_rfo,cache-references
+- mc_threads: 4 (cpus: 0-3)
+- mut: -T 4 -c 1 -d 32 -r 1 -u 0.5
+- warmup: 60s / duration: 30s / runs: 3
+- spin_rounds: 30 (fixed)
+- pause_per_round values: 0 25 50 100 200
+- est_time: ~15 min
