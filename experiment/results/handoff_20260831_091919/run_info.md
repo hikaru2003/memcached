@@ -1,0 +1,12 @@
+# Run info (handoff latency sweep)
+- date: 2026-08-31 09:19:19
+- commit: b1f59f1a
+- branch: results
+- bin: ./memcached_handoff_debug
+- mutilate_bin: ../mutilate/mutilate_p999
+- mc_threads: 8 (cpus: 0-7)
+- mut: -T 4 -c 1 -d 32 -r 1 -u 0.5
+- warmup: 60s / duration: 30s / runs: 3
+- spin_rounds: 30 (fixed)
+- pause_per_round values: 0 25 50 100 200
+- est_time: ~12 min
