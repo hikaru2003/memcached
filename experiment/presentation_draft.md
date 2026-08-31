@@ -144,9 +144,9 @@ void spinlock_lock(lock) {
 **図: `experiment/results/plots/v2/qps_comparison.pdf`**
 
 1. **PAUSEサイクル数が大きいアーキテクチャほど、少ない挿入回数で最大スループットに到達する**
-   - Skylake（~156cy）: 最も少ないNでピーク → N増加とともに急落
-   - Ice Lake（~53cy）: Skylakeよりやや大きいNでピーク
-   - Broadwell（~22cy）: 最も大きいNでピーク → 高NでもQPS維持
+   - Skylake（~124cy）: 最も少ないNでピーク → N増加とともに急落
+   - Ice Lake（~39cy）: Skylakeよりやや大きいNでピーク
+   - Broadwell（~10cy）: 最も大きいNでピーク → 高NでもQPS維持
 
 2. **挿入回数を増やすにつれてスループットは改善するが、過剰な挿入で徐々に悪化する（山形）**
    - N=0（PAUSE なし）: tight spinによりCPUリソースを無駄に消費

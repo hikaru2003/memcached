@@ -29,7 +29,7 @@ Known hardware types (Wisconsin cluster):
   xl170   Broadwell     Xeon E5-2640 v4    PAUSE~10cyc
   c8220   Ivy Bridge    Xeon E5-2650 v2    PAUSE~15cyc
   sm110   Ice Lake      Xeon Gold 6338     PAUSE~39cyc
-  c6620   Emerald Rapids Xeon Gold 6554S   PAUSE~22cyc
+  c6620   Emerald Rapids Xeon Gold 6554S   PAUSE~37cyc
   sm220u  (TBD)
 """
 

@@ -39,7 +39,7 @@ arch_options = [
     ("ivybridge",     "Ivy Bridge     (c8220   / Xeon E5-2650 v2,   PAUSE~15cyc)  [Clemson]"),
     ("skylake",       "Skylake        (c220g5  / Xeon Silver 4114,  PAUSE~124cyc) [Wisconsin]"),
     ("icelake",       "Ice Lake       (sm110p  / Xeon Gold 6338,    PAUSE~39cyc)  [Wisconsin]"),
-    ("emeraldrapids", "Emerald Rapids (c6620   / Xeon Gold 6554S,   PAUSE~22cyc)  [Utah]"),
+    ("emeraldrapids", "Emerald Rapids (c6620   / Xeon Gold 6554S,   PAUSE~37cyc)  [Utah]"),
 ]
 
 HW_MAP = {

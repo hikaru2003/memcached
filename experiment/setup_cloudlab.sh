@@ -277,7 +277,7 @@ echo "  CPU model  : $cpu_model"
 
 # アーキテクチャ判定
 # PAUSE実測値（-O2コンパイル、pause_cycle_count.c 実測）:
-#   Ivy Bridge≈15cyc, Broadwell≈10cyc, Skylake≈124cyc, IceLake≈39cyc, Emerald≈22cyc
+#   Ivy Bridge≈15cyc, Broadwell≈10cyc, Skylake≈124cyc, IceLake≈39cyc, Emerald≈37cyc
 # CloudLab hardware type → CPU model の対応:
 #   c8220(Ivy): Xeon E5-2650 v2  /  xl170(Broadwell): Xeon E5-2640 v4
 #   c220g5(Skylake): Xeon Silver 4114  /  sm110(IceLake): Xeon Gold 6338
@@ -290,7 +290,7 @@ elif echo "$cpu_model" | grep -qiE "E5-2[0-9]+.*v2|E7-.*v2|E3-.*v2"; then
     PAUSE_NOTE="Ivy Bridge(c8220): PAUSE~15cyc"
 elif echo "$cpu_model" | grep -qiE "6554|6548|6538|emerald"; then
     ARCH_NAME="emeraldrapids"
-    PAUSE_NOTE="Emerald Rapids(c6620): PAUSE~22cyc"
+    PAUSE_NOTE="Emerald Rapids(c6620): PAUSE~37cyc"
 elif echo "$cpu_model" | grep -qiE "6338|6348|6354|Silver 4[3-9][0-9]{2}|ice lake|icelake"; then
     ARCH_NAME="icelake"
     PAUSE_NOTE="Ice Lake(sm110): PAUSE~39cyc"

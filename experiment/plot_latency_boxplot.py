@@ -33,7 +33,7 @@ RESULTS_BASE = "experiment/results"
 
 ARCH_INFO = {
     "broadwell":     ("Broadwell (xl170, PAUSE~10cyc)",                "tab:blue"),
-    "emeraldrapids": ("Emerald Rapids (c6620, PAUSE~22cyc)",           "tab:green"),
+    "emeraldrapids": ("Emerald Rapids (c6620, PAUSE~37cyc)",           "tab:green"),
     "skylake_ann":   ("Skylake ann (Xeon Silver 4110, PAUSE~124cyc)",  "tab:pink"),
 }
 

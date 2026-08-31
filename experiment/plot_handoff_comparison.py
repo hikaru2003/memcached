@@ -43,7 +43,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 ARCH_INFO = {
     "broadwell":     {"label": "Broadwell (PAUSE~10cyc)",      "color": "tab:blue"},
-    "emeraldrapids": {"label": "Emerald Rapids (PAUSE~22cyc)", "color": "tab:red"},
+    "emeraldrapids": {"label": "Emerald Rapids (PAUSE~37cyc)", "color": "tab:red"},
     "icelake":       {"label": "Sunny Cove (PAUSE~39cyc)",     "color": "tab:orange"},
     "skylake_ann":   {"label": "Skylake (PAUSE~124cyc)",       "color": "tab:green"},
 }

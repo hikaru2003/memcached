@@ -49,7 +49,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 ARCH_INFO = {
     "broadwell":     {"label": "Broadwell (PAUSE~10cy)",      "color": "tab:blue",   "marker": "o"},
     "icelake":       {"label": "Sunny Cove (PAUSE~39cy)",     "color": "tab:orange", "marker": "s"},
-    "emeraldrapids": {"label": "Emerald Rapids (PAUSE~22cy)", "color": "tab:red",    "marker": "^"},
+    "emeraldrapids": {"label": "Emerald Rapids (PAUSE~37cy)", "color": "tab:red",    "marker": "^"},
 }
 
 THREAD_COUNTS = [2, 4, 8]
