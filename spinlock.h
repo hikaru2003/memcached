@@ -12,15 +12,14 @@ static inline uint64_t _rdtsc(void) {
     return ((uint64_t)hi << 32) | lo;
 }
 
-/* spinlock_record_handoff: implemented in thread.c */
-extern void spinlock_record_handoff(uint64_t delta);
+/* spinlock_record_unlock: implemented in thread.c */
+extern void spinlock_record_unlock(uint64_t delta);
 
 typedef struct {
     pthread_mutex_t mutex;
-    uint64_t release_tsc; /* written by unlocker before unlock; read by next acquirer */
 } spinlock_t;
 
-#define SPINLOCK_INITIALIZER { PTHREAD_MUTEX_INITIALIZER, 0 }
+#define SPINLOCK_INITIALIZER { PTHREAD_MUTEX_INITIALIZER }
 
 /* MySQL (InnoDB) -like spinlock parameters.
  *
@@ -44,21 +43,17 @@ extern int global_pause_per_round;
 
 static inline void spinlock_init(spinlock_t *sl) {
     pthread_mutex_init(&sl->mutex, NULL);
-    sl->release_tsc = 0;
 }
 
 static inline void spinlock_lock(spinlock_t *sl) {
     for (int round = 0; round < global_spin_rounds; round++) {
-        if (pthread_mutex_trylock(&sl->mutex) == 0) {
-            spinlock_record_handoff(_rdtsc() - sl->release_tsc);
+        if (pthread_mutex_trylock(&sl->mutex) == 0)
             return;
-        }
         for (int p = 0; p < global_pause_per_round; p++) {
             cpu_relax();
         }
     }
     pthread_mutex_lock(&sl->mutex);
-    spinlock_record_handoff(_rdtsc() - sl->release_tsc);
 }
 
 static inline int spinlock_trylock(spinlock_t *sl) {
@@ -66,10 +61,13 @@ static inline int spinlock_trylock(spinlock_t *sl) {
 }
 
 static inline void spinlock_unlock(spinlock_t *sl) {
-    /* release_tsc はunlock前に書く。pthread_mutex_unlockのリリースバリアにより
-     * 次の獲得者には必ずこの値が見える。 */
-    sl->release_tsc = _rdtsc();
+    /* unlock latency 計測: pthread_mutex_unlock 内部で lock 変数へ atomic store
+     * するために M 権を再取得する必要がある。他コアが trylock で M を奪う
+     * 頻度が高いほど、この store 待ちが伸びる = 競合の指標。 */
+    uint64_t t1 = _rdtsc();
     pthread_mutex_unlock(&sl->mutex);
+    uint64_t t2 = _rdtsc();
+    spinlock_record_unlock(t2 - t1);
 }
 
 #endif /* SPINLOCK_H */

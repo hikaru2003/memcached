@@ -21,17 +21,17 @@
 
 int global_spin_rounds     = 30;
 int global_pause_per_round = 0;
-int global_handoff_buf_size = (1 << 20); /* 1M samples per thread */
+int global_unlock_buf_size = (1 << 20); /* 1M samples per thread */
 
 static __thread LIBEVENT_THREAD *tl_me = NULL;
 
-void spinlock_record_handoff(uint64_t delta) {
-    if (!tl_me || !tl_me->handoff_samples)
+void spinlock_record_unlock(uint64_t delta) {
+    if (!tl_me || !tl_me->unlock_samples)
         return;
-    tl_me->handoff_samples[tl_me->handoff_pos] = delta;
-    tl_me->handoff_pos = (tl_me->handoff_pos + 1) % tl_me->handoff_buf_size;
-    if (tl_me->handoff_count < tl_me->handoff_buf_size)
-        tl_me->handoff_count++;
+    tl_me->unlock_samples[tl_me->unlock_pos] = delta;
+    tl_me->unlock_pos = (tl_me->unlock_pos + 1) % tl_me->unlock_buf_size;
+    if (tl_me->unlock_count < tl_me->unlock_buf_size)
+        tl_me->unlock_count++;
 }
 
 #include "queue.h"
@@ -473,12 +473,12 @@ static void setup_thread(LIBEVENT_THREAD *me) {
         exit(EXIT_FAILURE);
     }
 
-    me->handoff_buf_size = (uint32_t)global_handoff_buf_size;
-    me->handoff_samples  = calloc(me->handoff_buf_size, sizeof(uint64_t));
-    me->handoff_pos      = 0;
-    me->handoff_count    = 0;
-    if (!me->handoff_samples) {
-        fprintf(stderr, "Failed to allocate handoff sample buffer\n");
+    me->unlock_buf_size = (uint32_t)global_unlock_buf_size;
+    me->unlock_samples  = calloc(me->unlock_buf_size, sizeof(uint64_t));
+    me->unlock_pos      = 0;
+    me->unlock_count    = 0;
+    if (!me->unlock_samples) {
+        fprintf(stderr, "Failed to allocate unlock sample buffer\n");
         exit(EXIT_FAILURE);
     }
     // Note: we were cleanly passing in num_threads before, but this now
