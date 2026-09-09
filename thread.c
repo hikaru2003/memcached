@@ -33,6 +33,7 @@ void spinlock_record_hold(uint64_t delta) {
     tl_me->hold_pos = (tl_me->hold_pos + 1) % tl_me->hold_buf_size;
     if (tl_me->hold_count < tl_me->hold_buf_size)
         tl_me->hold_count++;
+    tl_me->hold_total_count++;  /* ring buffer と独立の累積カウンタ */
 }
 
 #include "queue.h"
@@ -478,6 +479,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
     me->hold_samples  = calloc(me->hold_buf_size, sizeof(uint64_t));
     me->hold_pos      = 0;
     me->hold_count    = 0;
+    me->hold_total_count = 0;
     if (!me->hold_samples) {
         fprintf(stderr, "Failed to allocate hold sample buffer\n");
         exit(EXIT_FAILURE);

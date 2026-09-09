@@ -767,6 +767,7 @@ typedef struct {
     uint32_t  hold_pos;
     uint32_t  hold_count;
     uint32_t  hold_buf_size;
+    uint64_t  hold_total_count; /* 累積 CS 実行回数 (SIGUSR2 で reset) - per-thread 分布用 */
 } LIBEVENT_THREAD;
 
 /**

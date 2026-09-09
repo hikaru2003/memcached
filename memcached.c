@@ -4266,12 +4266,19 @@ static void sig_usrhandler(const int sig) {
 
 /* SIGUSR2: dump per-thread critical section length ring buffers to binary files and reset.
  * hold_samples_thread<N>.bin : lock 獲得〜unlock 直前のサイクル数 (= CS 実行時間)
- * 各ファイルは uint64_t のフラット配列 (rdtsc cycles). dump 後に buffer を reset。 */
+ * hold_counts.txt            : 各スレッドの累積 CS 実行回数 (per-thread 取得分布分析用)
+ * 各 .bin は uint64_t のフラット配列 (rdtsc cycles). dump 後に buffer / counter を reset。 */
 static void sig_hold_dump(const int sig) {
     char fname[64];
     int dumped = 0;
+    FILE *fc = fopen("hold_counts.txt", "w");
     for (int i = 0; i < settings.num_threads; i++) {
         LIBEVENT_THREAD *t = get_worker_thread(i);
+        if (fc) {
+            fprintf(fc, "thread%d,%llu\n", i,
+                    (unsigned long long)t->hold_total_count);
+        }
+        t->hold_total_count = 0;
         if (!t->hold_samples || t->hold_count == 0)
             continue;
         snprintf(fname, sizeof(fname), "hold_samples_thread%d.bin", i);
@@ -4291,7 +4298,9 @@ static void sig_hold_dump(const int sig) {
         t->hold_count = 0;
         dumped++;
     }
-    fprintf(stderr, "[hold] dumped %d thread(s) to hold_samples_thread*.bin\n", dumped);
+    if (fc) fclose(fc);
+    fprintf(stderr, "[hold] dumped %d thread(s) to hold_samples_thread*.bin, "
+                    "counts to hold_counts.txt\n", dumped);
 }
 
 /*
