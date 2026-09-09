@@ -21,6 +21,19 @@
 
 int global_spin_rounds     = 30;
 int global_pause_per_round = 0;
+int global_hold_buf_size = (1 << 20); /* 1M samples per thread */
+
+__thread uint64_t tl_lock_start = 0;
+static __thread LIBEVENT_THREAD *tl_me = NULL;
+
+void spinlock_record_hold(uint64_t delta) {
+    if (!tl_me || !tl_me->hold_samples)
+        return;
+    tl_me->hold_samples[tl_me->hold_pos] = delta;
+    tl_me->hold_pos = (tl_me->hold_pos + 1) % tl_me->hold_buf_size;
+    if (tl_me->hold_count < tl_me->hold_buf_size)
+        tl_me->hold_count++;
+}
 
 #include "queue.h"
 #include "tls.h"
@@ -460,6 +473,15 @@ static void setup_thread(LIBEVENT_THREAD *me) {
         fprintf(stderr, "Failed to create read buffer cache\n");
         exit(EXIT_FAILURE);
     }
+
+    me->hold_buf_size = (uint32_t)global_hold_buf_size;
+    me->hold_samples  = calloc(me->hold_buf_size, sizeof(uint64_t));
+    me->hold_pos      = 0;
+    me->hold_count    = 0;
+    if (!me->hold_samples) {
+        fprintf(stderr, "Failed to allocate hold sample buffer\n");
+        exit(EXIT_FAILURE);
+    }
     // Note: we were cleanly passing in num_threads before, but this now
     // relies on settings globals too much.
     if (settings.read_buf_mem_limit) {
@@ -510,6 +532,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
  */
 static void *worker_libevent(void *arg) {
     LIBEVENT_THREAD *me = arg;
+    tl_me = me;
 
     /* Any per-thread setup can happen here; memcached_thread_init() will block until
      * all threads have finished initializing.

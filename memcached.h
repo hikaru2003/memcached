@@ -763,6 +763,10 @@ typedef struct {
     uint32_t proxy_rng[4]; // fast per-thread rng for lua.
     // TODO: add ctx object so we can attach to queue.
 #endif
+    uint64_t *hold_samples;    /* ring buffer: critical section length (rdtsc cycles) */
+    uint32_t  hold_pos;
+    uint32_t  hold_count;
+    uint32_t  hold_buf_size;
 } LIBEVENT_THREAD;
 
 /**

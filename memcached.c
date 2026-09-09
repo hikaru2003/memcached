@@ -4264,6 +4264,36 @@ static void sig_usrhandler(const int sig) {
     stop_main_loop = GRACE_STOP;
 }
 
+/* SIGUSR2: dump per-thread critical section length ring buffers to binary files and reset.
+ * hold_samples_thread<N>.bin : lock 獲得〜unlock 直前のサイクル数 (= CS 実行時間)
+ * 各ファイルは uint64_t のフラット配列 (rdtsc cycles). dump 後に buffer を reset。 */
+static void sig_hold_dump(const int sig) {
+    char fname[64];
+    int dumped = 0;
+    for (int i = 0; i < settings.num_threads; i++) {
+        LIBEVENT_THREAD *t = get_worker_thread(i);
+        if (!t->hold_samples || t->hold_count == 0)
+            continue;
+        snprintf(fname, sizeof(fname), "hold_samples_thread%d.bin", i);
+        FILE *f = fopen(fname, "wb");
+        if (!f)
+            continue;
+        if (t->hold_count < t->hold_buf_size) {
+            fwrite(t->hold_samples, sizeof(uint64_t), t->hold_count, f);
+        } else {
+            uint32_t start = t->hold_pos;
+            fwrite(t->hold_samples + start, sizeof(uint64_t),
+                   t->hold_buf_size - start, f);
+            fwrite(t->hold_samples, sizeof(uint64_t), start, f);
+        }
+        fclose(f);
+        t->hold_pos   = 0;
+        t->hold_count = 0;
+        dumped++;
+    }
+    fprintf(stderr, "[hold] dumped %d thread(s) to hold_samples_thread*.bin\n", dumped);
+}
+
 /*
  * On systems that supports multiple page sizes we may reduce the
  * number of TLB-misses by using the biggest available page size
@@ -4865,6 +4895,7 @@ int main (int argc, char **argv) {
     signal(SIGTERM, sig_handler);
     signal(SIGHUP, sighup_handler);
     signal(SIGUSR1, sig_usrhandler);
+    signal(SIGUSR2, sig_hold_dump);
 
     /* init settings */
     settings_init();
