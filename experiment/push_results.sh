@@ -1,10 +1,11 @@
 #!/bin/bash
 # Usage:
 #   cd ~/Application/memcached
-#   bash experiment/push_results.sh                          # utdelay sweep 結果
-#   EXPERIMENT_TYPE=wait bash experiment/push_results.sh     # wait distribution 結果
-#   EXPERIMENT_TYPE=futex bash experiment/push_results.sh    # futex sweep 結果
-#   EXPERIMENT_TYPE=handoff bash experiment/push_results.sh  # handoff latency 結果
+#   bash experiment/push_results.sh                            # utdelay sweep 結果
+#   EXPERIMENT_TYPE=handoff    bash experiment/push_results.sh  # handoff latency 結果
+#   EXPERIMENT_TYPE=cache_miss bash experiment/push_results.sh  # cache_miss (RFO) 結果
+#   EXPERIMENT_TYPE=futex      bash experiment/push_results.sh  # futex fallback 結果
+#   EXPERIMENT_TYPE=wait       bash experiment/push_results.sh  # wait distribution (旧実験)
 #
 # Description:
 #   CloudLab サーバ上での実験結果を GitHub にプッシュする。
@@ -12,19 +13,21 @@
 #   .bin ファイル（大容量）は除外し、CSV・md のみを push する。
 #
 # Parameters (env vars):
-#   EXPERIMENT_TYPE - 実験タイプ: utdelay | wait | futex  (default: utdelay)
+#   EXPERIMENT_TYPE - 実験タイプ: utdelay | handoff | cache_miss | futex | wait  (default: utdelay)
 #   ARCH_NAME       - アーキテクチャ名             (default: 自動検出)
 #   RESULT_DIR      - 結果ディレクトリ             (default: experiment/results)
 #   REMOTE          - push 先リモート              (default: myfork)
 #
 # Output:
-#   origin/experiment/results/<arch>-utdelay-YYYYMMDD  : utdelay sweep 結果
-#   origin/experiment/results/<arch>-wait-YYYYMMDD     : wait distribution 結果
+#   origin/experiment/results/<arch>-<type>-YYYYMMDD  : 実験結果ブランチ
 #
 # Prerequisites:
 #   - GitHub への push 権限（ssh -A でのエージェント転送 or HTTPS token）
-#   - utdelay: run_utdelay_sweep_p999.sh 実行済み
-#   - wait   : run_wait_distribution.sh + extract_wait_stats.py 実行済み
+#   - utdelay   : run_utdelay_sweep_p999.sh 実行済み (utdelay_p999_* ディレクトリ)
+#   - handoff   : run_handoff_sweep.sh + extract_handoff_stats.py 実行済み
+#   - cache_miss: run_cache_miss_sweep.sh 実行済み
+#   - futex     : run_futex_sweep.sh 実行済み
+#   - wait      : run_wait_distribution.sh + extract_wait_stats.py 実行済み
 
 set -uo pipefail
 

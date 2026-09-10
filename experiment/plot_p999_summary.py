@@ -26,7 +26,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-DEFAULT_DIR = "experiment/results/utdelay_p999_20260702_112351"
+DEFAULT_DIR = "experiment/results/archive/20260910/misc/utdelay_p999_20260702_112351"
 OPT_LABEL   = "N10"   # 最良 N（赤ハイライト）
 
 

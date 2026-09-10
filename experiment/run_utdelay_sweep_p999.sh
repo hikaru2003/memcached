@@ -4,10 +4,11 @@
 #   bash experiment/run_utdelay_sweep_p999.sh
 #
 # Description:
-#   run_utdelay_sweep.sh の p999 計測版。
-#   mutilate_p999 バイナリ（p999 カラム追加済み）を使用し、
-#   代表的な N 値だけを計測することで実験時間を短縮する。
-#   スタベーション仮説（N 大 → tail latency 悪化）の検証用。
+#   run_utdelay_sweep.sh の p999 計測版 (publication-quality)。
+#   mutilate_p999 バイナリ（p50/p999 カラム追加済み）を使用し、
+#   read/write 両方向で p50/p90/p95/p99/p999 を記録する。
+#   push_results.sh (EXPERIMENT_TYPE=utdelay) はこの実装が生成する
+#   utdelay_p999_YYYYMMDD_HHMMSS/ ディレクトリを対象とする。
 #
 # Parameters (env vars):
 #   MEMCACHED_BIN          - utdelay バイナリ                (default: ./memcached_utdelay)
@@ -19,11 +20,11 @@
 #   DEPTH                  - mutilate pipeline depth (-d)     (default: 32)
 #   RECORDS                - key range (-r)                   (default: 1)
 #   UPDATE_RATIO           - SET 割合 (-u)                    (default: 0.5)
-#   WARMUP_SEC             - warmup 秒数                     (default: 150)
+#   WARMUP_SEC             - warmup 秒数                     (default: 120)
 #   DURATION               - 計測秒数                        (default: 60)
-#   RUNS                   - 各 N のラン数                    (default: 3)
+#   RUNS                   - 各 N のラン数                    (default: 30)
 #   SPIN_ROUNDS            - trylock 試行回数（固定）          (default: 30)
-#   PAUSE_PER_ROUND_VALUES - N sweep 値                      (default: 0-10全整数, N15, step-5 in 20-100, 150 200)
+#   PAUSE_PER_ROUND_VALUES - N sweep 値                      (default: 40点 [0-18全整数, 20-30 2刻み, 33-60 密, 70-200 疎])
 #   PORT                   - memcached ポート                (default: 11222)
 #   MC_CPUS                - memcached CPU affinity          (default: 0-3)
 #   WL_CPUS                - mutilate CPU affinity           (default: 4-7)
@@ -51,11 +52,11 @@ MUT_CONNS="${MUT_CONNS:-1}"
 DEPTH="${DEPTH:-32}"
 RECORDS="${RECORDS:-1}"
 UPDATE_RATIO="${UPDATE_RATIO:-0.5}"
-WARMUP_SEC="${WARMUP_SEC:-300}"
+WARMUP_SEC="${WARMUP_SEC:-120}"
 DURATION="${DURATION:-60}"
-RUNS="${RUNS:-10}"
+RUNS="${RUNS:-30}"
 SPIN_ROUNDS="${SPIN_ROUNDS:-30}"
-PAUSE_PER_ROUND_VALUES="${PAUSE_PER_ROUND_VALUES:-0 1 2 3 4 5 6 7 8 9 10 15 20 25 30 35 40 45 50 55 60 65 70 75 80 85 90 95 100 150 200}"
+PAUSE_PER_ROUND_VALUES="${PAUSE_PER_ROUND_VALUES:-0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 20 22 24 26 28 30 33 36 40 45 50 55 60 70 80 90 100 125 150 175 200}"
 PORT="${PORT:-11222}"
 MC_CPUS="${MC_CPUS:-0-3}"
 WL_CPUS="${WL_CPUS:-4-7}"

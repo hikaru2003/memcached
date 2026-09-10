@@ -40,7 +40,7 @@ ARCH_INFO = {
 # arch別ディレクトリ外のデータ（rawディレクトリパスを直接指定）
 EXTRA_RAW_DIRS = {
     "skylake_ann": {
-        "path": "experiment/results/utdelay_p999_20260702_112351/raw",
+        "path": "experiment/results/archive/20260910/misc/utdelay_p999_20260702_112351/raw",
     },
 }
 

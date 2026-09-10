@@ -7,15 +7,15 @@
 #   pause-spinlock ブランチ（Skylake ann サーバ）の sweep 結果を出力する。
 #   対象ブランチ: experiment/pause-spinlock
 #   実装: [trylock → PAUSE×1] × N → mutex_lock  （N = PAUSE_COUNT）
-#   データソース: experiment/results/pause_spinlock_skylake_ann/raw.csv
+#   データソース: experiment/results/archive/20260910/misc/pause_spinlock_skylake_ann/raw.csv
 #     （pause-spinlock ブランチの pause_d32_mc4_mut4_run3/get50_set50/raw.csv から抽出）
 #
 # Output:
-#   experiment/results/pause_spinlock_skylake_ann_qps.pdf : 生QPS ± 1σ
+#   experiment/results/archive/20260910/misc/pause_spinlock_skylake_ann_qps.pdf : 生QPS ± 1σ
 #
 # Prerequisites:
 #   pip install matplotlib numpy
-#   experiment/results/pause_spinlock_skylake_ann/raw.csv が存在すること
+#   experiment/results/archive/20260910/misc/pause_spinlock_skylake_ann/raw.csv が存在すること
 #   （存在しない場合: git show experiment/pause-spinlock:experiment/results/
 #     pause_d32_mc4_mut4_run3/get50_set50/raw.csv > 上記パス で抽出）
 

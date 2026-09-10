@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>CS 長測定の実態と問題点</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+    max-width: 960px;
+    margin: 2em auto;
+    padding: 0 1.5em;
+    line-height: 1.7;
+    color: #222;
+  }
+  h1 { border-bottom: 3px solid #333; padding-bottom: 0.3em; }
+  h2 { border-left: 5px solid #4a7ac9; padding-left: 0.5em; margin-top: 2.5em; }
+  h3 { color: #333; margin-top: 1.8em; }
+  code, pre {
+    font-family: "SF Mono", Consolas, Menlo, monospace;
+    background: #f4f6f8;
+    border-radius: 3px;
+  }
+  code { padding: 2px 5px; font-size: 0.9em; }
+  pre {
+    padding: 1em;
+    overflow-x: auto;
+    border: 1px solid #d0d7de;
+    line-height: 1.5;
+  }
+  .figure {
+    margin: 1.5em 0;
+    text-align: center;
+    background: #fafbfc;
+    padding: 1em;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+  }
+  .caption {
+    font-size: 0.9em;
+    color: #57606a;
+    margin-top: 0.5em;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+  }
+  th, td {
+    border: 1px solid #d0d7de;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  th { background: #f4f6f8; }
+  .highlight-box {
+    background: #fffbdd;
+    border-left: 4px solid #d4a72c;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .warn-box {
+    background: #ffebe9;
+    border-left: 4px solid #cf222e;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .ok-box {
+    background: #dafbe1;
+    border-left: 4px solid #1a7f37;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .toc {
+    background: #f4f6f8;
+    padding: 1em 1.5em;
+    border-radius: 6px;
+    margin: 1.5em 0;
+  }
+  .toc ol { margin: 0; padding-left: 1.5em; }
+</style>
+</head>
+<body>
+
+<h1>CS 長測定の実態と問題点</h1>
+
+<p>
+  Phase 1・Phase 2 で測定した「クリティカルセクション長 (CS 長)」の内容を再確認したところ、
+  <strong>複数種類のロックの CS 長が混合されて計測されている</strong> ことが判明した。
+  これは光の元の仮説 (item_lock の獲得競争と self-service パターン) の検証には
+  不十分である。本資料は測定内容・問題点・次のアクションを整理する。
+</p>
+
+<div class="toc">
+<strong>目次</strong>
+<ol>
+  <li>実装: どこで何を測定していたか</li>
+  <li>memcached の spinlock は 2 種類ある</li>
+  <li>実測データから読み取れる CS の内訳</li>
+  <li>何が問題か</li>
+  <li>次のステップ: item_lock 単独測定</li>
+</ol>
+</div>
+
+<h2>1. 実装: どこで何を測定していたか</h2>
+
+<p>Phase 1・Phase 2 で使ったバイナリ (<code>memcached_hold_debug</code>) では、
+<code>spinlock.h</code> の <code>spinlock_lock</code> / <code>spinlock_unlock</code> に rdtsc 計測を仕込んでいた:</p>
+
+<pre><code>static inline void spinlock_lock(spinlock_t *sl) {
+    for (int round = 0; round &lt; 30; round++) {
+        if (pthread_mutex_trylock(&amp;sl-&gt;mutex) == 0) {
+            tl_lock_start = _rdtsc();   <b>&larr; 開始点</b>
+            return;
+        }
+        for (int p = 0; p &lt; N; p++) cpu_relax();
+    }
+    pthread_mutex_lock(&amp;sl-&gt;mutex);
+    tl_lock_start = _rdtsc();
+}
+
+static inline void spinlock_unlock(spinlock_t *sl) {
+    spinlock_record_hold(_rdtsc() - tl_lock_start);  <b>&larr; delta 記録</b>
+    pthread_mutex_unlock(&amp;sl-&gt;mutex);
+}</code></pre>
+
+<p>
+  つまり計測しているのは <strong>trylock 成功後 → pthread_mutex_unlock 直前</strong> の rdtsc 差分。
+  これは光の元の理解通り (「1 回の lock 保持時間」)。
+</p>
+
+<div class="highlight-box">
+<strong>問題の芽</strong>: <code>spinlock_lock</code> / <code>spinlock_unlock</code> は
+<strong>memcached 内の全ての spinlock 使用箇所で共通</strong>に呼ばれる。
+特定のロックだけを計測する仕組みになっていない。
+</div>
+
+<h2>2. memcached の spinlock は 2 種類ある</h2>
+
+<p>ソースコードを確認したところ、<code>spinlock_t</code> の定義と使用箇所は以下:</p>
+
+<table>
+<tr><th>ロック</th><th>宣言箇所</th><th>用途</th><th>使用回数</th></tr>
+<tr><td><code>item_locks[]</code></td><td>thread.c: 配列 (ハッシュで割り振り)</td><td>item アクセス保護</td><td>SET/GET ごとに 1 回</td></tr>
+<tr><td><code>slabs_lock</code></td><td>slabs.c: グローバル 1 個</td><td>slab allocator 保護</td><td>SET 時の allocate/free、GET 時の統計参照など多数</td></tr>
+</table>
+
+<h3>単一 key ワークロード (SET/GET 50%) での競合パターン</h3>
+
+<div class="figure">
+<svg viewBox="0 0 800 340" xmlns="http://www.w3.org/2000/svg">
+  <text x="400" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    1 request 処理中の spinlock 呼び出し (推定)
+  </text>
+
+  <!-- Timeline -->
+  <line x1="60" y1="200" x2="740" y2="200" stroke="#333" stroke-width="2"/>
+  <text x="60" y="220" font-size="11" fill="#333">req 受信</text>
+  <text x="740" y="220" text-anchor="end" font-size="11" fill="#333">response 送信</text>
+
+  <!-- item_lock event -->
+  <rect x="120" y="140" width="80" height="30" fill="#ffcccc" stroke="#c00" stroke-width="2"/>
+  <text x="160" y="130" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">item_lock</text>
+  <text x="160" y="160" text-anchor="middle" font-size="10">acquire/release</text>
+  <line x1="160" y1="170" x2="160" y2="200" stroke="#c00" stroke-width="1.5"/>
+  <text x="160" y="245" text-anchor="middle" font-size="10" fill="#c00">単一 key</text>
+  <text x="160" y="258" text-anchor="middle" font-size="10" fill="#c00">= 高競合</text>
+
+  <!-- slabs_lock events -->
+  <rect x="240" y="140" width="80" height="30" fill="#ccddff" stroke="#06c" stroke-width="2"/>
+  <text x="280" y="130" text-anchor="middle" font-size="11" font-weight="bold" fill="#06c">slabs_lock</text>
+  <text x="280" y="160" text-anchor="middle" font-size="10">allocate</text>
+  <line x1="280" y1="170" x2="280" y2="200" stroke="#06c" stroke-width="1.5"/>
+
+  <rect x="340" y="140" width="80" height="30" fill="#ccddff" stroke="#06c" stroke-width="2"/>
+  <text x="380" y="130" text-anchor="middle" font-size="11" font-weight="bold" fill="#06c">slabs_lock</text>
+  <text x="380" y="160" text-anchor="middle" font-size="10">free (old)</text>
+  <line x1="380" y1="170" x2="380" y2="200" stroke="#06c" stroke-width="1.5"/>
+
+  <rect x="440" y="140" width="80" height="30" fill="#ccddff" stroke="#06c" stroke-width="2"/>
+  <text x="480" y="130" text-anchor="middle" font-size="11" font-weight="bold" fill="#06c">slabs_lock</text>
+  <text x="480" y="160" text-anchor="middle" font-size="10">stats</text>
+  <line x1="480" y1="170" x2="480" y2="200" stroke="#06c" stroke-width="1.5"/>
+
+  <rect x="540" y="140" width="80" height="30" fill="#ccddff" stroke="#06c" stroke-width="2"/>
+  <text x="580" y="130" text-anchor="middle" font-size="11" font-weight="bold" fill="#06c">slabs_lock</text>
+  <text x="580" y="160" text-anchor="middle" font-size="10">stats</text>
+  <line x1="580" y1="170" x2="580" y2="200" stroke="#06c" stroke-width="1.5"/>
+
+  <text x="400" y="290" text-anchor="middle" font-size="12" fill="#333">
+    実測: 1 req 処理あたり 5 CS 実行 (spinlock_lock/unlock 合計)
+  </text>
+  <text x="400" y="310" text-anchor="middle" font-size="12" font-weight="bold" fill="#c00">
+    Phase 1/2 で測っていた「CS 長」= item_lock (1) + slabs_lock (数回) の混合
+  </text>
+</svg>
+<div class="caption">図 1: 1 request 処理中に複数種類の spinlock が呼ばれる (推定内訳)</div>
+</div>
+
+<h2>3. 実測データから読み取れる CS の内訳</h2>
+
+<p>実測データから 1 request あたりの spinlock 実行回数を計算:</p>
+
+<pre><code>合計 CS 実行数 (90秒) / QPS × 90秒 = CS/req</code></pre>
+
+<table>
+<tr><th>N</th><th>QPS</th><th>合計 CS 実行数 (90秒)</th><th>CS/req</th></tr>
+<tr><td>0</td><td>780k</td><td>350M</td><td>5.0</td></tr>
+<tr><td>5</td><td>910k</td><td>409M</td><td>5.0</td></tr>
+<tr><td>30</td><td>870k</td><td>391M</td><td>5.0</td></tr>
+<tr><td>200</td><td>700k</td><td>316M</td><td>5.0</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>1 req = 5 CS 実行</strong> (N によらず一定)。
+つまり Phase 1 で観察した CS 長分布は「1 req 内で 5 回発生する spinlock 保持時間の統計」であり、
+<strong>item_lock 単独の値ではない</strong>。
+</div>
+
+<h2>4. 何が問題か</h2>
+
+<h3>光の元の仮説を思い出す</h3>
+
+<div class="warn-box">
+<strong>元の仮説</strong>: 「N が極端に大きいと、他のスレッドが長時間 PAUSE 中の間に、
+CS を実行中のスレッドが 1 リクエスト処理を完了し、再度 item_lock を獲得できる。
+その結果 self-service パターン (1 スレッドが独占) が発生する。」
+</div>
+
+<p>この仮説の検証には <strong>item_lock 単独の獲得パターン</strong> が必要:</p>
+
+<ul>
+  <li>item_lock は <strong>単一 key ワークロード</strong> で 4 workers が奪い合う特定のロック</li>
+  <li>slabs_lock も 4 workers が奪い合うが、性質が異なる (グローバル、SET 時に多数呼ばれる)</li>
+  <li>両者を混ぜて測ると、item_lock の self-service パターンが検出できない</li>
+</ul>
+
+<h3>具体的な問題</h3>
+
+<div class="figure">
+<svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
+  <text x="400" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    問題: 混合計測では item_lock の独占パターンが埋もれる
+  </text>
+
+  <g transform="translate(0, 50)">
+    <text x="150" y="20" text-anchor="middle" font-size="13" font-weight="bold" fill="#c00">混合計測 (現状)</text>
+
+    <!-- worker 0 -->
+    <text x="30" y="60" font-size="11" font-weight="bold">worker0</text>
+    <rect x="80" y="50" width="15" height="20" fill="#ffcccc" stroke="#c00"/>  <!-- item -->
+    <rect x="100" y="50" width="15" height="20" fill="#ccddff" stroke="#06c"/> <!-- slabs -->
+    <rect x="120" y="50" width="15" height="20" fill="#ccddff" stroke="#06c"/>
+    <rect x="150" y="50" width="15" height="20" fill="#ffcccc" stroke="#c00"/>
+    <rect x="170" y="50" width="15" height="20" fill="#ccddff" stroke="#06c"/>
+
+    <text x="30" y="100" font-size="11" font-weight="bold">worker1</text>
+    <rect x="90" y="90" width="15" height="20" fill="#ccddff" stroke="#06c"/>
+    <rect x="130" y="90" width="15" height="20" fill="#ffcccc" stroke="#c00"/>
+    <rect x="160" y="90" width="15" height="20" fill="#ccddff" stroke="#06c"/>
+    <rect x="180" y="90" width="15" height="20" fill="#ccddff" stroke="#06c"/>
+    <rect x="200" y="90" width="15" height="20" fill="#ffcccc" stroke="#c00"/>
+
+    <text x="150" y="140" text-anchor="middle" font-size="11" fill="#333">全部混ざって記録される</text>
+    <text x="150" y="160" text-anchor="middle" font-size="11" fill="#c00">→ 累積 CS 数は均等に見えるが</text>
+    <text x="150" y="180" text-anchor="middle" font-size="11" fill="#c00">item_lock 単独では独占の可能性</text>
+  </g>
+
+  <g transform="translate(400, 50)">
+    <text x="200" y="20" text-anchor="middle" font-size="13" font-weight="bold" fill="#080">分離計測 (提案)</text>
+
+    <text x="30" y="60" font-size="11" font-weight="bold">worker0</text>
+    <text x="80" y="45" font-size="9" fill="#c00">item:</text>
+    <rect x="80" y="50" width="15" height="20" fill="#ffcccc" stroke="#c00"/>
+    <rect x="100" y="50" width="15" height="20" fill="#ffcccc" stroke="#c00"/>
+    <rect x="120" y="50" width="15" height="20" fill="#ffcccc" stroke="#c00"/>
+
+    <text x="30" y="100" font-size="11" font-weight="bold">worker1</text>
+    <text x="80" y="85" font-size="9" fill="#c00">item:</text>
+    <text x="80" y="105" text-anchor="middle" font-size="10" fill="#666">(取れず)</text>
+
+    <text x="200" y="140" text-anchor="middle" font-size="11" fill="#333">item_lock だけ分離して記録</text>
+    <text x="200" y="160" text-anchor="middle" font-size="11" fill="#080">→ 独占パターンが明確に検出可能</text>
+    <text x="200" y="180" text-anchor="middle" font-size="11" fill="#080">worker0 独占の証拠が出る</text>
+  </g>
+</svg>
+<div class="caption">図 2: 混合計測では item_lock の独占が slabs_lock の均等分配で相殺されてしまう可能性</div>
+</div>
+
+<h3>混合計測でも均等分布になった理由 (仮説)</h3>
+
+<p>Phase 1/2 で観察された per-thread 分布 25%/25%/25%/25% は以下の理由で説明可能:</p>
+
+<ol>
+  <li><strong>slabs_lock</strong> は SET のたびに呼ばれ、mutilate の 4 thread が対称に SET を送るので均等分配</li>
+  <li>slabs_lock の呼び出し回数 (~4 CS/req) が item_lock (~1 CS/req) より多い</li>
+  <li>合算するとほぼ slabs_lock の分布に支配される → 均等に見える</li>
+  <li>item_lock 単独では self-service パターンが発生していても、混合で埋もれる</li>
+</ol>
+
+<h2>5. 次のステップ: item_lock 単独測定</h2>
+
+<h3>実装案</h3>
+
+<pre><code>// spinlock.h に item_lock 専用の関数を追加
+
+static inline void item_spinlock_lock(spinlock_t *sl) {
+    for (int round = 0; round &lt; 30; round++) {
+        if (pthread_mutex_trylock(&amp;sl-&gt;mutex) == 0) {
+            tl_item_lock_start = _rdtsc();   <b>&larr; item 専用の tsc</b>
+            return;
+        }
+        for (int p = 0; p &lt; N; p++) cpu_relax();
+    }
+    pthread_mutex_lock(&amp;sl-&gt;mutex);
+    tl_item_lock_start = _rdtsc();
+}
+
+static inline void item_spinlock_unlock(spinlock_t *sl) {
+    <b>spinlock_record_item_hold(_rdtsc() - tl_item_lock_start);</b>
+    pthread_mutex_unlock(&amp;sl-&gt;mutex);
+}</code></pre>
+
+<p>そして thread.c の item_lock 使用箇所を書き換え:</p>
+
+<pre><code>// thread.c:136
+- spinlock_lock(&amp;item_locks[hv &amp; hashmask(item_lock_hashpower)]);
++ item_spinlock_lock(&amp;item_locks[hv &amp; hashmask(item_lock_hashpower)]);</code></pre>
+
+<p>これで:</p>
+<ul>
+  <li>item_lock 用の rdtsc 計測とカウンタは <code>hold_item_samples</code> / <code>hold_item_total_count</code></li>
+  <li>slabs_lock (既存の spinlock_lock/unlock を使う箇所) は既存の <code>hold_samples</code></li>
+  <li>SIGUSR2 で両方を dump: <code>hold_item_samples_thread&lt;N&gt;.bin</code>, <code>hold_slabs_samples_thread&lt;N&gt;.bin</code></li>
+</ul>
+
+<h3>期待される検証結果</h3>
+
+<table>
+<tr><th>測定対象</th><th>期待される分布 (N=200)</th><th>意義</th></tr>
+<tr><td><strong>item_lock 単独</strong></td><td>偏り発生の可能性あり (self-service?)</td><td>光の元の仮説を検証</td></tr>
+<tr><td><strong>slabs_lock 単独</strong></td><td>均等 (mutilate 対称ワークロード由来)</td><td>ワークロード対称性の再確認</td></tr>
+<tr><td>両者の CS 長</td><td>それぞれ異なる分布 (item は短い、slabs は長い?)</td><td>ロックごとの特性を把握</td></tr>
+</table>
+
+<h3>実験プラン</h3>
+
+<ol>
+  <li>debug/hold-time-v2 に item_lock 分離パッチを追加 (小規模)</li>
+  <li>ビルド → memcached_hold_split_debug</li>
+  <li>Phase 1 と同じ条件で sweep 実行 (T=4, N sweep, ~97 分)</li>
+  <li>item_lock 単独の per-thread 分布を確認</li>
+  <li>もし偏りがあれば self-service 仮説が支持される</li>
+  <li>偏りがなければ、光の仮説は棄却 → 均等分配は真の統計的現象</li>
+</ol>
+
+<hr>
+<p style="color: #666; font-size: 0.9em; text-align: right;">
+  作成: 2026-09-10 / 関連資料: <code>spinlock_cacheline.html</code>, <code>workload_symmetry.html</code>, <code>pipeline_back_pressure.html</code>
+</p>
+
+</body>
+</html>

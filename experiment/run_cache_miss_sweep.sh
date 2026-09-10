@@ -18,11 +18,12 @@
 #   DEPTH                  - mutilate pipeline depth (-d)     (default: 32)
 #   RECORDS                - key range (-r)                   (default: 1)
 #   UPDATE_RATIO           - SET 割合 (-u)                    (default: 0.5)
-#   WARMUP_SEC             - warmup 秒数                     (default: 150)
+#   WARMUP_SEC             - warmup 秒数                     (default: 60)
 #   DURATION               - 計測秒数                        (default: 60)
-#   RUNS                   - 各 N のラン数                    (default: 5)
+#   RUNS                   - 各 N のラン数                    (default: 10)
 #   SPIN_ROUNDS            - trylock 試行回数（固定）          (default: 30)
-#   PAUSE_PER_ROUND_VALUES - N sweep 値                      (default: 0-10全整数, 15, step-5 in 20-100, 150 200)
+#   PAUSE_PER_ROUND_VALUES - N sweep 値                      (default: 40点 [0-18全整数, 20-30 2刻み, 33-60 密, 70-200 疎])
+#   RFO_EVENT              - RFO 計測 perf イベント名          (default: 自動判別、Emerald は l2_rqsts.rfo_miss)
 #   PORT                   - memcached ポート                (default: 11222)
 #   MC_CPUS                - memcached CPU affinity          (default: 0-3)
 #   WL_CPUS                - mutilate CPU affinity           (default: 4-7)
@@ -49,18 +50,37 @@ MUT_CONNS="${MUT_CONNS:-1}"
 DEPTH="${DEPTH:-32}"
 RECORDS="${RECORDS:-1}"
 UPDATE_RATIO="${UPDATE_RATIO:-0.5}"
-WARMUP_SEC="${WARMUP_SEC:-150}"
+WARMUP_SEC="${WARMUP_SEC:-60}"
 DURATION="${DURATION:-60}"
-RUNS="${RUNS:-5}"
+RUNS="${RUNS:-10}"
 SPIN_ROUNDS="${SPIN_ROUNDS:-30}"
-PAUSE_PER_ROUND_VALUES="${PAUSE_PER_ROUND_VALUES:-0 1 2 3 4 5 6 7 8 9 10 15 20 25 30 35 40 45 50 55 60 65 70 75 80 85 90 95 100 150 200}"
+PAUSE_PER_ROUND_VALUES="${PAUSE_PER_ROUND_VALUES:-0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 20 22 24 26 28 30 33 36 40 45 50 55 60 70 80 90 100 125 150 175 200}"
 PORT="${PORT:-11222}"
 MC_CPUS="${MC_CPUS:-0-3}"
 WL_CPUS="${WL_CPUS:-4-7}"
 
-# perf イベント（Skylake / Broadwell 両対応）
-# LLC-store-misses は Broadwell で未実装（0固定）のため offcore_requests.demand_rfo を使用
-PERF_EVENTS="cache-misses,LLC-load-misses,offcore_requests.demand_rfo,cache-references"
+# perf RFO イベント自動判別
+# - Skylake / Broadwell / Ice Lake: offcore_requests.demand_rfo
+# - Emerald Rapids: offcore_requests.demand_rfo が N/A なので l2_rqsts.rfo_miss にフォールバック
+# 判定は perf list の出力で行う (offcore_requests.demand_rfo がリストにあるかで分岐)
+detect_rfo_event() {
+    local perf_list_out
+    perf_list_out=$(perf list 2>/dev/null || true)
+    if echo "$perf_list_out" | grep -qE "offcore_requests\.demand_rfo"; then
+        echo "offcore_requests.demand_rfo"
+    elif echo "$perf_list_out" | grep -qE "l2_rqsts\.rfo_miss"; then
+        echo "l2_rqsts.rfo_miss"
+    else
+        # perf list が使えない or 両方無い → demand_rfo で試す
+        echo "offcore_requests.demand_rfo"
+    fi
+}
+
+RFO_EVENT="${RFO_EVENT:-$(detect_rfo_event)}"
+echo "[INFO] RFO event: $RFO_EVENT"
+
+# CSV 列名は互換性のため demand_rfo 固定 (Emerald は l2_rqsts.rfo_miss の値が入る)
+PERF_EVENTS="cache-misses,LLC-load-misses,${RFO_EVENT},cache-references"
 
 # ---- CPU 環境チェック ----
 check_perf_env() {
@@ -229,7 +249,7 @@ run_one_config() {
         local cm llc_ld llc_st cr llc_miss_rate
         cm=$(parse_perf_value     "$perf_log" "cache-misses")
         llc_ld=$(parse_perf_value "$perf_log" "LLC-load-misses")
-        llc_st=$(parse_perf_value "$perf_log" "offcore_requests.demand_rfo")
+        llc_st=$(parse_perf_value "$perf_log" "$RFO_EVENT")
         cr=$(parse_perf_value     "$perf_log" "cache-references")
 
         # LLC miss 率（cache-misses / cache-references * 100）

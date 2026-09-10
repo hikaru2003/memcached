@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Closed-loop workload と pipeline back-pressure による自動収束</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+    max-width: 960px;
+    margin: 2em auto;
+    padding: 0 1.5em;
+    line-height: 1.7;
+    color: #222;
+  }
+  h1 { border-bottom: 3px solid #333; padding-bottom: 0.3em; }
+  h2 { border-left: 5px solid #4a7ac9; padding-left: 0.5em; margin-top: 2.5em; }
+  h3 { color: #333; margin-top: 1.8em; }
+  code, pre {
+    font-family: "SF Mono", Consolas, Menlo, monospace;
+    background: #f4f6f8;
+    border-radius: 3px;
+  }
+  code { padding: 2px 5px; font-size: 0.9em; }
+  pre {
+    padding: 1em;
+    overflow-x: auto;
+    border: 1px solid #d0d7de;
+    line-height: 1.5;
+  }
+  .figure {
+    margin: 1.5em 0;
+    text-align: center;
+    background: #fafbfc;
+    padding: 1em;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+  }
+  .caption {
+    font-size: 0.9em;
+    color: #57606a;
+    margin-top: 0.5em;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+  }
+  th, td {
+    border: 1px solid #d0d7de;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  th { background: #f4f6f8; }
+  .highlight-box {
+    background: #fffbdd;
+    border-left: 4px solid #d4a72c;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .warn-box {
+    background: #ffebe9;
+    border-left: 4px solid #cf222e;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .ok-box {
+    background: #dafbe1;
+    border-left: 4px solid #1a7f37;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .toc {
+    background: #f4f6f8;
+    padding: 1em 1.5em;
+    border-radius: 6px;
+    margin: 1.5em 0;
+  }
+  .toc ol { margin: 0; padding-left: 1.5em; }
+</style>
+</head>
+<body>
+
+<h1>Closed-loop workload と pipeline back-pressure による自動収束</h1>
+
+<p>
+  「per-thread 分布が均等になるのは誰が作用してるからなのか？」という光の質問への回答。
+  結論: <strong>誰か特定のコンポーネントが調整しているわけではなく、closed-loop workload の
+  pipeline depth 制約が back-pressure として自動的に作用している</strong>。
+</p>
+
+<div class="toc">
+<strong>目次</strong>
+<ol>
+  <li>前提: mutilate は closed-loop</li>
+  <li>Pipeline depth (-d 32) の意味</li>
+  <li>もし self-service (独占) が発生したら</li>
+  <li>Pipeline 満杯 → 送信停止 → 独占が続かない</li>
+  <li>「自然な収束」の実体</li>
+</ol>
+</div>
+
+<h2>1. 前提: mutilate は closed-loop</h2>
+
+<p>負荷生成側 (mutilate) には 2 通りのモードがある:</p>
+
+<table>
+<tr><th>モード</th><th>動作</th><th>本実験</th></tr>
+<tr><td><strong>Open-loop</strong></td><td>時間ベースで request を送り続ける (rate を指定)。response 待たない</td><td>❌ 使用してない</td></tr>
+<tr><td><strong>Closed-loop</strong> (pipeline)</td><td>outstanding request が pipeline depth に達したら送信停止。response が返ったら次を送る</td><td>✅ <strong>これを使用</strong> (-d 32)</td></tr>
+</table>
+
+<h2>2. Pipeline depth (-d 32) の意味</h2>
+
+<p>mutilate 起動時のフラグ:</p>
+
+<pre><code>mutilate -T 4 -c 1 <b>-d 32</b> ...</code></pre>
+
+<p>各 connection について:</p>
+
+<ul>
+  <li>mutilate は最大 <strong>32 個の request を outstanding (未応答) にできる</strong></li>
+  <li>32 個溜まったら <strong>response を受け取るまで送信停止</strong></li>
+  <li>response が 1 個返ってきたら → 次の request を 1 個送信</li>
+</ul>
+
+<div class="figure">
+<svg viewBox="0 0 800 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrb1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4a7ac9"/>
+    </marker>
+    <marker id="arrb2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c00"/>
+    </marker>
+  </defs>
+
+  <text x="400" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    Pipeline depth = 32 (outstanding request の上限)
+  </text>
+
+  <!-- mutilate -->
+  <rect x="30" y="60" width="140" height="100" fill="#dafbe1" stroke="#080" stroke-width="2"/>
+  <text x="100" y="85" text-anchor="middle" font-size="13" font-weight="bold">mutilate thread</text>
+  <text x="100" y="105" text-anchor="middle" font-size="11">1 connection</text>
+  <text x="100" y="125" text-anchor="middle" font-size="10" fill="#666">max 32 outstanding</text>
+  <text x="100" y="145" text-anchor="middle" font-size="10" fill="#666">requests</text>
+
+  <!-- Requests going right -->
+  <line x1="170" y1="90" x2="330" y2="90" stroke="#4a7ac9" stroke-width="2" marker-end="url(#arrb1)"/>
+  <text x="250" y="83" text-anchor="middle" font-size="11" fill="#4a7ac9">SET/GET request</text>
+
+  <!-- Responses going left -->
+  <line x1="330" y1="130" x2="170" y2="130" stroke="#c00" stroke-width="2" marker-end="url(#arrb2)"/>
+  <text x="250" y="147" text-anchor="middle" font-size="11" fill="#c00">response</text>
+
+  <!-- memcached worker -->
+  <rect x="330" y="60" width="140" height="100" fill="#ffe0e0" stroke="#c00" stroke-width="2"/>
+  <text x="400" y="85" text-anchor="middle" font-size="13" font-weight="bold">memcached worker</text>
+  <text x="400" y="105" text-anchor="middle" font-size="11">担当接続の event loop</text>
+  <text x="400" y="125" text-anchor="middle" font-size="10" fill="#666">1 req 処理:</text>
+  <text x="400" y="140" text-anchor="middle" font-size="10" fill="#666">parse → lock → CS → unlock</text>
+
+  <!-- Outstanding buffer visualization -->
+  <text x="600" y="60" text-anchor="middle" font-size="12" fill="#333">outstanding buffer (現在 15/32)</text>
+  <g transform="translate(500, 80)">
+    <g fill="#4a7ac9" opacity="0.7">
+      <rect x="0"   y="0" width="8" height="14"/>
+      <rect x="10"  y="0" width="8" height="14"/>
+      <rect x="20"  y="0" width="8" height="14"/>
+      <rect x="30"  y="0" width="8" height="14"/>
+      <rect x="40"  y="0" width="8" height="14"/>
+      <rect x="50"  y="0" width="8" height="14"/>
+      <rect x="60"  y="0" width="8" height="14"/>
+      <rect x="70"  y="0" width="8" height="14"/>
+      <rect x="80"  y="0" width="8" height="14"/>
+      <rect x="90"  y="0" width="8" height="14"/>
+      <rect x="100" y="0" width="8" height="14"/>
+      <rect x="110" y="0" width="8" height="14"/>
+      <rect x="120" y="0" width="8" height="14"/>
+      <rect x="130" y="0" width="8" height="14"/>
+      <rect x="140" y="0" width="8" height="14"/>
+    </g>
+    <g fill="none" stroke="#888">
+      <rect x="150" y="0" width="8" height="14"/>
+      <rect x="160" y="0" width="8" height="14"/>
+      <rect x="170" y="0" width="8" height="14"/>
+      <rect x="180" y="0" width="8" height="14"/>
+      <rect x="190" y="0" width="8" height="14"/>
+      <rect x="200" y="0" width="8" height="14"/>
+      <rect x="210" y="0" width="8" height="14"/>
+      <rect x="220" y="0" width="8" height="14"/>
+      <rect x="230" y="0" width="8" height="14"/>
+      <rect x="240" y="0" width="8" height="14"/>
+      <rect x="250" y="0" width="8" height="14"/>
+      <rect x="260" y="0" width="8" height="14"/>
+      <rect x="270" y="0" width="8" height="14"/>
+    </g>
+  </g>
+  <text x="530" y="115" font-size="10" fill="#4a7ac9">15 outstanding</text>
+  <text x="670" y="115" font-size="10" fill="#666">17 空き</text>
+
+  <text x="600" y="175" text-anchor="middle" font-size="11" fill="#333">
+    → まだ空きがあるので mutilate は次の request を送れる
+  </text>
+  <text x="600" y="195" text-anchor="middle" font-size="11" fill="#c00">
+    もし 32 個満杯なら送信停止 (back-pressure)
+  </text>
+</svg>
+<div class="caption">図 1: Pipeline depth の意味。outstanding が 32 に達すると mutilate が送信を止める</div>
+</div>
+
+<h2>3. もし self-service (独占) が発生したら</h2>
+
+<p>時刻 t=0 で偶然 worker 0 が連続してロックを取り始めたと仮定する:</p>
+
+<div class="figure">
+<svg viewBox="0 0 900 460" xmlns="http://www.w3.org/2000/svg">
+  <text x="450" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    時刻 t = 0 (定常状態、全 conn の outstanding は 15/32 くらい)
+  </text>
+
+  <!-- 4 mutilate threads -->
+  <g transform="translate(0, 40)">
+    <g id="row0">
+      <rect x="20"  y="0"  width="90" height="30" fill="#dafbe1" stroke="#080"/>
+      <text x="65" y="20" text-anchor="middle" font-size="11">mut0</text>
+      <text x="145" y="20" text-anchor="middle" font-size="10" fill="#666">15/32</text>
+      <rect x="180" y="0"  width="90" height="30" fill="#e0f0ff" stroke="#06c"/>
+      <text x="225" y="20" text-anchor="middle" font-size="11">conn0</text>
+      <line x1="270" y1="15" x2="340" y2="15" stroke="#333" stroke-width="1.5"/>
+      <rect x="340" y="0"  width="100" height="30" fill="#ffe0e0" stroke="#c00"/>
+      <text x="390" y="20" text-anchor="middle" font-size="11">worker0</text>
+      <text x="480" y="20" text-anchor="middle" font-size="11" fill="#c00">🔒 CS 実行中</text>
+    </g>
+  </g>
+  <g transform="translate(0, 80)">
+    <rect x="20"  y="0"  width="90" height="30" fill="#dafbe1" stroke="#080"/>
+    <text x="65" y="20" text-anchor="middle" font-size="11">mut1</text>
+    <text x="145" y="20" text-anchor="middle" font-size="10" fill="#666">14/32</text>
+    <rect x="180" y="0"  width="90" height="30" fill="#e0f0ff" stroke="#06c"/>
+    <text x="225" y="20" text-anchor="middle" font-size="11">conn1</text>
+    <line x1="270" y1="15" x2="340" y2="15" stroke="#333" stroke-width="1.5"/>
+    <rect x="340" y="0"  width="100" height="30" fill="#ffe0e0" stroke="#c00"/>
+    <text x="390" y="20" text-anchor="middle" font-size="11">worker1</text>
+    <text x="480" y="20" text-anchor="middle" font-size="11" fill="#666">🔄 spin (待機)</text>
+  </g>
+  <g transform="translate(0, 120)">
+    <rect x="20"  y="0"  width="90" height="30" fill="#dafbe1" stroke="#080"/>
+    <text x="65" y="20" text-anchor="middle" font-size="11">mut2</text>
+    <text x="145" y="20" text-anchor="middle" font-size="10" fill="#666">16/32</text>
+    <rect x="180" y="0"  width="90" height="30" fill="#e0f0ff" stroke="#06c"/>
+    <text x="225" y="20" text-anchor="middle" font-size="11">conn2</text>
+    <line x1="270" y1="15" x2="340" y2="15" stroke="#333" stroke-width="1.5"/>
+    <rect x="340" y="0"  width="100" height="30" fill="#ffe0e0" stroke="#c00"/>
+    <text x="390" y="20" text-anchor="middle" font-size="11">worker2</text>
+    <text x="480" y="20" text-anchor="middle" font-size="11" fill="#666">🔄 spin (待機)</text>
+  </g>
+  <g transform="translate(0, 160)">
+    <rect x="20"  y="0"  width="90" height="30" fill="#dafbe1" stroke="#080"/>
+    <text x="65" y="20" text-anchor="middle" font-size="11">mut3</text>
+    <text x="145" y="20" text-anchor="middle" font-size="10" fill="#666">15/32</text>
+    <rect x="180" y="0"  width="90" height="30" fill="#e0f0ff" stroke="#06c"/>
+    <text x="225" y="20" text-anchor="middle" font-size="11">conn3</text>
+    <line x1="270" y1="15" x2="340" y2="15" stroke="#333" stroke-width="1.5"/>
+    <rect x="340" y="0"  width="100" height="30" fill="#ffe0e0" stroke="#c00"/>
+    <text x="390" y="20" text-anchor="middle" font-size="11">worker3</text>
+    <text x="480" y="20" text-anchor="middle" font-size="11" fill="#666">🔄 spin (待機)</text>
+  </g>
+
+  <!-- t = 1 second -->
+  <text x="450" y="230" text-anchor="middle" font-size="14" font-weight="bold" fill="#c00">
+    時刻 t = 1s (worker0 が独占的にロックを取り続けた場合)
+  </text>
+
+  <g transform="translate(0, 250)">
+    <rect x="20"  y="0"  width="90" height="30" fill="#dafbe1" stroke="#080"/>
+    <text x="65" y="20" text-anchor="middle" font-size="11">mut0</text>
+    <text x="145" y="20" text-anchor="middle" font-size="10" fill="#080">14/32</text>
+    <rect x="180" y="0"  width="90" height="30" fill="#e0f0ff" stroke="#06c"/>
+    <text x="225" y="20" text-anchor="middle" font-size="11">conn0</text>
+    <text x="480" y="20" text-anchor="middle" font-size="11" fill="#c00">🔒 高速で CS 回転</text>
+  </g>
+  <g transform="translate(0, 290)">
+    <rect x="20"  y="0"  width="90" height="30" fill="#ffcccc" stroke="#c00" stroke-width="2"/>
+    <text x="65" y="20" text-anchor="middle" font-size="11" font-weight="bold">mut1</text>
+    <text x="145" y="20" text-anchor="middle" font-size="10" fill="#c00" font-weight="bold">32/32 満杯!</text>
+    <rect x="180" y="0"  width="90" height="30" fill="#e0f0ff" stroke="#06c"/>
+    <text x="225" y="20" text-anchor="middle" font-size="11">conn1</text>
+    <text x="480" y="20" text-anchor="middle" font-size="11" fill="#c00" font-weight="bold">⛔ 送信停止</text>
+  </g>
+  <g transform="translate(0, 330)">
+    <rect x="20"  y="0"  width="90" height="30" fill="#ffcccc" stroke="#c00" stroke-width="2"/>
+    <text x="65" y="20" text-anchor="middle" font-size="11" font-weight="bold">mut2</text>
+    <text x="145" y="20" text-anchor="middle" font-size="10" fill="#c00" font-weight="bold">32/32 満杯!</text>
+    <rect x="180" y="0"  width="90" height="30" fill="#e0f0ff" stroke="#06c"/>
+    <text x="225" y="20" text-anchor="middle" font-size="11">conn2</text>
+    <text x="480" y="20" text-anchor="middle" font-size="11" fill="#c00" font-weight="bold">⛔ 送信停止</text>
+  </g>
+  <g transform="translate(0, 370)">
+    <rect x="20"  y="0"  width="90" height="30" fill="#ffcccc" stroke="#c00" stroke-width="2"/>
+    <text x="65" y="20" text-anchor="middle" font-size="11" font-weight="bold">mut3</text>
+    <text x="145" y="20" text-anchor="middle" font-size="10" fill="#c00" font-weight="bold">32/32 満杯!</text>
+    <rect x="180" y="0"  width="90" height="30" fill="#e0f0ff" stroke="#06c"/>
+    <text x="225" y="20" text-anchor="middle" font-size="11">conn3</text>
+    <text x="480" y="20" text-anchor="middle" font-size="11" fill="#c00" font-weight="bold">⛔ 送信停止</text>
+  </g>
+
+  <text x="450" y="430" text-anchor="middle" font-size="12" fill="#c00">
+    → mut1-3 は response が返らない (worker1-3 が処理していない) ため 32 個溜まって送信停止
+  </text>
+  <text x="450" y="450" text-anchor="middle" font-size="12" fill="#333">
+    → conn1-3 の request pipeline が空にならないと mut1-3 は次を送れない
+  </text>
+</svg>
+<div class="caption">図 2: 独占状態が続くと、他 conn の pipeline が満杯になり mutilate 側の送信が停止する</div>
+</div>
+
+<h2>4. Pipeline 満杯 → 送信停止 → 独占が続かない</h2>
+
+<p>時刻 t=1s の状態からさらに時間が進むと:</p>
+
+<div class="figure">
+<svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
+  <text x="450" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    時刻 t = 2s (mut1-3 送信停止が続いた結果)
+  </text>
+
+  <g transform="translate(0, 40)">
+    <rect x="20"  y="0"  width="90" height="30" fill="#dafbe1" stroke="#080"/>
+    <text x="65" y="20" text-anchor="middle" font-size="11">mut0</text>
+    <text x="145" y="20" text-anchor="middle" font-size="10" fill="#666">15/32</text>
+    <rect x="180" y="0"  width="90" height="30" fill="#e0f0ff" stroke="#06c"/>
+    <text x="225" y="20" text-anchor="middle" font-size="11">conn0</text>
+    <text x="410" y="20" text-anchor="middle" font-size="11" fill="#c00">🔒 CS 実行中 (worker0)</text>
+    <text x="640" y="20" text-anchor="middle" font-size="11" fill="#666">← conn0 は流れ続ける</text>
+  </g>
+
+  <g transform="translate(0, 100)">
+    <text x="450" y="0" text-anchor="middle" font-size="13" fill="#333" font-weight="bold">
+      その後 worker0 が unlock、次に trylock 成功するのは？
+    </text>
+  </g>
+
+  <g transform="translate(20, 130)">
+    <rect x="0" y="0" width="860" height="140" fill="#f4f6f8" stroke="#666"/>
+    <text x="430" y="25" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">
+      worker0 が次の CS を実行しようとする → だが処理する request が...
+    </text>
+
+    <text x="430" y="55" text-anchor="middle" font-size="11" fill="#333">
+      conn0 の request pipeline は 15 個 outstanding → 15 個順次処理可能
+    </text>
+    <text x="430" y="75" text-anchor="middle" font-size="11" fill="#333">
+      15 個全部処理し終えると → conn0 の pipeline も空になる
+    </text>
+    <text x="430" y="98" text-anchor="middle" font-size="11" fill="#c00" font-weight="bold">
+      → worker0 も request 待ちで idle になる
+    </text>
+    <text x="430" y="120" text-anchor="middle" font-size="11" fill="#333">
+      同時に worker1-3 は 32 個の request を処理する機会がある = ロックを取る競争に参入
+    </text>
+  </g>
+</svg>
+<div class="caption">図 3: 独占側 (worker0) も request 供給が止まり、他 workers に順番が回ってくる</div>
+</div>
+
+<h2>5. 「自然な収束」の実体</h2>
+
+<div class="highlight-box">
+<strong>誰が調整しているのか？</strong>: 誰も直接調整していない。
+<strong>Pipeline depth 32 という物理的な制約</strong> が、以下の連鎖を強制する:
+
+<ol>
+  <li>もし 1 worker が独占的に CS を回すと</li>
+  <li>他 worker の conn の outstanding request が積み上がる</li>
+  <li>32 個溜まったら mutilate が送信停止 (back-pressure)</li>
+  <li>独占 worker の conn も高速回転しているが 1 conn 分の request しかない</li>
+  <li>結局 1 conn の rate ≈ 250k QPS 程度で頭打ち</li>
+  <li>この状態が続くと合計 QPS が下がる</li>
+  <li>一方、均等分配ができれば 4 conn 並列で 800-900k QPS 出る</li>
+  <li>ロック排他の仕組み上、確率的に独占が長続きせず均等に近づく</li>
+</ol>
+</div>
+
+<h3>もっと本質的な理由</h3>
+
+<p>実は「独占が発生しない」というよりも、<strong>独占が発生するとその状態を維持するインセンティブがない</strong> という方が正確:</p>
+
+<ul>
+  <li>ロックを取れる確率は「trylock を実行するタイミングで空いているか」で決まる</li>
+  <li>4 workers 全員が同じ確率で spin phase の任意時点にいる (対称ワークロード)</li>
+  <li>ある瞬間に worker A が偶然連続で取れても、その次は他 worker が取る確率が高い (ランダム化)</li>
+  <li>90 秒間の累積で「たまたま連続獲得」は特定 worker に偏らない</li>
+  <li>結果、per-thread 分布は 25%/25%/25%/25% に自然に落ち着く</li>
+</ul>
+
+<div class="ok-box">
+<strong>まとめ</strong>:
+<ul>
+  <li>「均等分配」は誰かが調整しているわけではない</li>
+  <li>本質は <strong>対称ワークロードでは全 workers が同じ確率でロックを取れる</strong></li>
+  <li>もし偏りが発生すると <strong>pipeline back-pressure で合計 QPS が下がる</strong> → その状態が長続きしない</li>
+  <li>結果、90 秒間の累積で観測される分布は自然に均等になる</li>
+</ul>
+</div>
+
+<hr>
+<p style="color: #666; font-size: 0.9em; text-align: right;">
+  作成: 2026-09-10 / 関連資料: <code>spinlock_cacheline.html</code>, <code>workload_symmetry.html</code>
+</p>
+
+</body>
+</html>

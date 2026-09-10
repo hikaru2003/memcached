@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>memcached のリクエスト処理フローとロック範囲</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+    max-width: 1000px;
+    margin: 2em auto;
+    padding: 0 1.5em;
+    line-height: 1.7;
+    color: #222;
+  }
+  h1 { border-bottom: 3px solid #333; padding-bottom: 0.3em; }
+  h2 { border-left: 5px solid #4a7ac9; padding-left: 0.5em; margin-top: 2.5em; }
+  h3 { color: #333; margin-top: 1.8em; }
+  code, pre {
+    font-family: "SF Mono", Consolas, Menlo, monospace;
+    background: #f4f6f8;
+    border-radius: 3px;
+  }
+  code { padding: 2px 5px; font-size: 0.9em; }
+  pre {
+    padding: 1em;
+    overflow-x: auto;
+    border: 1px solid #d0d7de;
+    line-height: 1.5;
+  }
+  .figure {
+    margin: 1.5em 0;
+    text-align: center;
+    background: #fafbfc;
+    padding: 1em;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+  }
+  .caption {
+    font-size: 0.9em;
+    color: #57606a;
+    margin-top: 0.5em;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+  }
+  th, td {
+    border: 1px solid #d0d7de;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f4f6f8; }
+  .highlight-box {
+    background: #fffbdd;
+    border-left: 4px solid #d4a72c;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .warn-box {
+    background: #ffebe9;
+    border-left: 4px solid #cf222e;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .ok-box {
+    background: #dafbe1;
+    border-left: 4px solid #1a7f37;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .toc {
+    background: #f4f6f8;
+    padding: 1em 1.5em;
+    border-radius: 6px;
+    margin: 1.5em 0;
+  }
+  .toc ol { margin: 0; padding-left: 1.5em; }
+  .lock-inside { background: #ffdada; }
+  .lock-outside { background: #daf0da; }
+</style>
+</head>
+<body>
+
+<h1>memcached のリクエスト処理フローとロック範囲</h1>
+
+<p>
+  「値の読み書きがロック外」というのは想定と違っていて不安だった。
+  なぜそれで安全なのか、また PAUSE で改善しようとしているのは全体のどこなのかを整理する。
+</p>
+
+<div class="toc">
+<strong>目次</strong>
+<ol>
+  <li>GET リクエストの全フロー</li>
+  <li>SET リクエストの全フロー (item_unlock を独立ブロックで表示 + アドレス書き換えの図解)</li>
+  <li>2.5 SET は待たない — deferred free (遅延解放) 設計</li>
+  <li>2.6 「削除」の実体 — リンク削除とメモリ解放は別物</li>
+  <li>なぜロック外で読み書きしても安全か (immutable item + refcount)</li>
+  <li>PAUSE で待っているのはどの部分か</li>
+  <li>PAUSE で改善しようとしているのはどこの処理か</li>
+  <li>並列できる部分と排他される部分</li>
+  <li>Consistency (一貫性) の話 - 更新前の値を読む可能性</li>
+</ol>
+</div>
+
+<h2>1. GET リクエストの全フロー</h2>
+
+<p><strong>光の元の想定</strong>: 「GET リクエストが来る → キーのロック取得 → 値を読む → ロック解放 → クライアントへ返信」</p>
+<p><strong>実際の実装</strong>: 「値の読み取りはロック外」。以下が正確な流れ:</p>
+
+<div class="figure">
+<svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .step-box { fill: #f4f6f8; stroke: #333; stroke-width: 1; }
+      .lock-region { fill: #ffe0e0; stroke: #c00; stroke-width: 2; stroke-dasharray: 4,3; }
+      .free-region { fill: #e0f0e0; stroke: #080; stroke-width: 1.5; }
+      .arrow { fill: #333; }
+      .label { font-size: 12px; fill: #333; }
+      .sub { font-size: 10px; fill: #666; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" class="arrow"/>
+    </marker>
+  </defs>
+
+  <text x="450" y="25" text-anchor="middle" font-size="15" font-weight="bold" fill="#333">
+    GET リクエストの処理フロー
+  </text>
+
+  <!-- Step 1: client → worker -->
+  <rect x="30" y="50" width="200" height="60" class="step-box"/>
+  <text x="130" y="72" text-anchor="middle" font-weight="bold" class="label">① クライアントから受信</text>
+  <text x="130" y="90" text-anchor="middle" class="sub">"get key\r\n"</text>
+  <text x="130" y="103" text-anchor="middle" class="sub">worker が read() で受信</text>
+
+  <line x1="230" y1="80" x2="270" y2="80" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Step 2: parse -->
+  <rect x="270" y="50" width="180" height="60" class="step-box"/>
+  <text x="360" y="72" text-anchor="middle" font-weight="bold" class="label">② parse</text>
+  <text x="360" y="90" text-anchor="middle" class="sub">コマンド解析</text>
+  <text x="360" y="103" text-anchor="middle" class="sub">hash(key) 計算</text>
+
+  <line x1="450" y1="80" x2="490" y2="80" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Step 3: try lock -->
+  <rect x="490" y="50" width="200" height="60" fill="#fff8e0" stroke="#d4a72c" stroke-width="2"/>
+  <text x="590" y="72" text-anchor="middle" font-weight="bold" fill="#c00" class="label">③ 🔄 PAUSE + trylock</text>
+  <text x="590" y="90" text-anchor="middle" class="sub">spinlock_lock(item_lock[hv])</text>
+  <text x="590" y="103" text-anchor="middle" class="sub" fill="#c00">← ここで PAUSE 挟む</text>
+
+  <!-- Arrow down -->
+  <line x1="590" y1="110" x2="590" y2="145" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Step 4: LOCKED region -->
+  <rect x="380" y="150" width="420" height="90" class="lock-region"/>
+  <text x="590" y="172" text-anchor="middle" font-weight="bold" fill="#c00" class="label">
+    🔒 item_lock 保持中 (CS 実行 = 数十〜数百 cy)
+  </text>
+  <text x="590" y="192" text-anchor="middle" class="sub">④ assoc_find(key) — hash table で item を検索</text>
+  <text x="590" y="208" text-anchor="middle" class="sub">⑤ refcount_incr(item) — 参照カウント++</text>
+  <text x="590" y="224" text-anchor="middle" class="sub" fill="#c00">
+    (実データはまだ read してない！ポインタと refcount 更新だけ)
+  </text>
+
+  <!-- Arrow down -->
+  <line x1="590" y1="240" x2="590" y2="270" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Step 6: unlock -->
+  <rect x="490" y="270" width="200" height="40" fill="#fff8e0" stroke="#d4a72c" stroke-width="2"/>
+  <text x="590" y="290" text-anchor="middle" font-weight="bold" class="label">⑥ item_unlock(hv)</text>
+  <text x="590" y="304" text-anchor="middle" class="sub">ロック解放</text>
+
+  <!-- Arrow left/down to free region -->
+  <line x1="590" y1="310" x2="590" y2="340" stroke="#080" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Free region: read item data -->
+  <rect x="150" y="345" width="620" height="80" class="free-region"/>
+  <text x="460" y="367" text-anchor="middle" font-weight="bold" fill="#080" class="label">
+    🔓 item_lock 外 (並列実行可能、他 worker と干渉なし)
+  </text>
+  <text x="460" y="387" text-anchor="middle" class="sub">⑦ item のデータ (value) を response buffer にコピー</text>
+  <text x="460" y="403" text-anchor="middle" class="sub">⑧ item_remove(item) — refcount-- (item_lock 短時間再取得)</text>
+  <text x="460" y="418" text-anchor="middle" class="sub">⑨ send() で "VALUE key ... value\r\nEND\r\n" を client に送信</text>
+
+  <!-- Final -->
+  <line x1="460" y1="425" x2="460" y2="450" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="460" y="468" text-anchor="middle" font-weight="bold" class="label">レスポンス完了</text>
+</svg>
+<div class="caption">図 1: GET リクエストの全フロー。ピンク領域が item_lock 保持中、緑領域がロック外</div>
+</div>
+
+<h2>2. SET リクエストの全フロー</h2>
+
+<p>SET は 2 つのロックが順に登場する。GET 図と対応させて、各ステップを縦に並べて整理:</p>
+
+<div class="figure">
+<svg viewBox="0 0 900 780" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .slabs-region { fill: #d0e0ff; stroke: #06c; stroke-width: 2; stroke-dasharray: 4,3; }
+    </style>
+    <marker id="arr3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+
+  <text x="450" y="30" text-anchor="middle" font-size="15" font-weight="bold" fill="#333">
+    SET リクエストの処理フロー (縦に整列)
+  </text>
+
+  <!-- ① 受信 -->
+  <rect x="200" y="55" width="500" height="50" class="step-box"/>
+  <text x="450" y="78" text-anchor="middle" font-weight="bold" class="label">① クライアントから受信 (recv + parse)</text>
+  <text x="450" y="95" text-anchor="middle" class="sub">"set key 0 0 5\r\nvalue\r\n"</text>
+  <line x1="450" y1="105" x2="450" y2="130" stroke="#333" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- ② PAUSE+trylock (slabs) -->
+  <rect x="200" y="133" width="500" height="55" fill="#fff8e0" stroke="#d4a72c" stroke-width="2"/>
+  <text x="450" y="155" text-anchor="middle" font-weight="bold" fill="#06c" class="label">
+    ② 🔄 PAUSE + trylock (slabs_lock)
+  </text>
+  <text x="450" y="175" text-anchor="middle" class="sub" fill="#06c">spinlock_lock(&amp;slabs_lock) ← ここで PAUSE を挟む</text>
+  <line x1="450" y1="188" x2="450" y2="213" stroke="#333" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- ③ slabs_lock 内 -->
+  <rect x="200" y="216" width="500" height="55" class="slabs-region"/>
+  <text x="450" y="238" text-anchor="middle" font-weight="bold" fill="#06c" class="label">
+    🔒 slabs_lock 保持中 (CS)
+  </text>
+  <text x="450" y="258" text-anchor="middle" class="sub">
+    ③ do_item_alloc — 新 item 用メモリ確保 (アドレス Y に配置)
+  </text>
+  <line x1="450" y1="271" x2="450" y2="296" stroke="#333" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- ④ slabs_unlock -->
+  <rect x="200" y="299" width="500" height="40" fill="#fff8e0" stroke="#d4a72c" stroke-width="2"/>
+  <text x="450" y="321" text-anchor="middle" font-weight="bold" fill="#06c" class="label">
+    ④ slabs_unlock (ロック解放)
+  </text>
+  <line x1="450" y1="339" x2="450" y2="364" stroke="#080" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- ⑤ ロック外: memcpy -->
+  <rect x="200" y="367" width="500" height="50" class="free-region"/>
+  <text x="450" y="388" text-anchor="middle" font-weight="bold" fill="#080" class="label">
+    🔓 ロック外 (並列可能、他 worker と干渉なし)
+  </text>
+  <text x="450" y="406" text-anchor="middle" class="sub">
+    ⑤ client の value データを new_item (アドレス Y) に memcpy
+  </text>
+  <line x1="450" y1="417" x2="450" y2="442" stroke="#333" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- ⑥ PAUSE+trylock (item) -->
+  <rect x="200" y="445" width="500" height="55" fill="#fff8e0" stroke="#d4a72c" stroke-width="2"/>
+  <text x="450" y="467" text-anchor="middle" font-weight="bold" fill="#c00" class="label">
+    ⑥ 🔄 PAUSE + trylock (item_lock)
+  </text>
+  <text x="450" y="487" text-anchor="middle" class="sub" fill="#c00">spinlock_lock(&amp;item_locks[hv]) ← ここで PAUSE を挟む</text>
+  <line x1="450" y1="500" x2="450" y2="525" stroke="#333" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- ⑦⑧⑨ item_lock 内 -->
+  <rect x="200" y="528" width="500" height="100" class="lock-region"/>
+  <text x="450" y="550" text-anchor="middle" font-weight="bold" fill="#c00" class="label">
+    🔒 item_lock 保持中 (CS = 数十〜数百 cy)
+  </text>
+  <text x="450" y="570" text-anchor="middle" class="sub">
+    ⑦ assoc_find で old_item (アドレス X) を取得
+  </text>
+  <text x="450" y="586" text-anchor="middle" class="sub">
+    ⑧ hash_table[key] のポインタを <tspan font-weight="bold">X → Y に書き換え</tspan> (do_item_link)
+  </text>
+  <text x="450" y="602" text-anchor="middle" class="sub">
+    ⑨ do_item_unlink(old_item) → refcount-- → もし 0 なら item_free (slabs_lock 再取得)
+  </text>
+  <text x="450" y="618" text-anchor="middle" class="sub" fill="#c00">
+    (refcount ≠ 0 なら free しない、待たない = deferred free)
+  </text>
+  <line x1="450" y1="628" x2="450" y2="653" stroke="#333" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- ⑩ item_unlock -->
+  <rect x="200" y="656" width="500" height="40" fill="#fff8e0" stroke="#d4a72c" stroke-width="2"/>
+  <text x="450" y="678" text-anchor="middle" font-weight="bold" fill="#c00" class="label">
+    ⑩ item_unlock (ロック解放)
+  </text>
+  <line x1="450" y1="696" x2="450" y2="721" stroke="#080" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- ⑪ ロック外: send -->
+  <rect x="200" y="724" width="500" height="45" class="free-region"/>
+  <text x="450" y="746" text-anchor="middle" font-weight="bold" fill="#080" class="label">
+    🔓 ⑪ "STORED\r\n" を client に送信 (ロック外)
+  </text>
+  <text x="450" y="762" text-anchor="middle" class="sub">
+    (old_item がまだ他 worker に read されていれば free は延期される)
+  </text>
+</svg>
+<div class="caption">図 2: SET リクエストの全フロー (縦に整列)。青領域が slabs_lock、ピンク領域が item_lock、緑領域がロック外</div>
+</div>
+
+<div class="highlight-box">
+<strong>重要な設計原則</strong>:
+<ul>
+  <li>refcount-- と item_free は <strong>item_lock 内で実行</strong></li>
+  <li>ただし refcount が 0 に <strong>ならない</strong> 場合 (誰かが read 中)、<strong>free せずそのまま抜ける</strong></li>
+  <li>SET リクエストは待たずに STORED を返信</li>
+  <li>old_item の実際の free は「最後の参照者」が行う (= deferred free / 遅延解放)</li>
+</ul>
+</div>
+
+<div class="highlight-box">
+<strong>重要な修正</strong>: refcount-- と item_free (もし発火するなら slabs_free まで) は
+<strong>item_lock 保持中に実行される</strong>。ロック外ではない。
+</div>
+
+<h3>SET は「アドレス書き換え」= new item を別アドレスに作る</h3>
+
+<div class="figure">
+<svg viewBox="0 0 900 380" xmlns="http://www.w3.org/2000/svg">
+  <text x="450" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    SET 実行時のメモリ状態変化 (アドレスは付け替え、値は上書きしない)
+  </text>
+
+  <!-- Before -->
+  <text x="150" y="60" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">SET 実行前</text>
+  <rect x="60" y="75" width="180" height="60" fill="#f4f6f8" stroke="#333"/>
+  <text x="150" y="95" text-anchor="middle" font-size="11" font-weight="bold">hash_table[hash(key)]</text>
+  <text x="150" y="115" text-anchor="middle" font-size="11">→ ポインタ = <tspan font-weight="bold">0xX</tspan></text>
+
+  <line x1="150" y1="135" x2="150" y2="170" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="60" y="175" width="180" height="70" fill="#ffe0e0" stroke="#c00"/>
+  <text x="150" y="195" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">item_A @ 0xX</text>
+  <text x="150" y="215" text-anchor="middle" font-size="11">value = <tspan font-weight="bold">"0"</tspan></text>
+  <text x="150" y="232" text-anchor="middle" font-size="10" fill="#666">refcount = 1</text>
+
+  <text x="150" y="290" text-anchor="middle" font-size="11" fill="#333">slab メモリ領域</text>
+  <text x="150" y="308" text-anchor="middle" font-size="10" fill="#666">(空きあり)</text>
+
+  <!-- Arrow: SET execution -->
+  <line x1="270" y1="200" x2="360" y2="200" stroke="#c00" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="315" y="185" text-anchor="middle" font-size="11" fill="#c00" font-weight="bold">SET(1) 実行</text>
+  <text x="315" y="220" text-anchor="middle" font-size="10" fill="#333">1. slab から新 item を alloc (0xY)</text>
+  <text x="315" y="235" text-anchor="middle" font-size="10" fill="#333">2. new item に "1" を memcpy</text>
+  <text x="315" y="250" text-anchor="middle" font-size="10" fill="#333">3. hash table のポインタを 0xX→0xY</text>
+  <text x="315" y="265" text-anchor="middle" font-size="10" fill="#333">4. old item は refcount で保持 (or free)</text>
+
+  <!-- After -->
+  <text x="700" y="60" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">SET 実行後</text>
+  <rect x="600" y="75" width="200" height="60" fill="#f4f6f8" stroke="#333"/>
+  <text x="700" y="95" text-anchor="middle" font-size="11" font-weight="bold">hash_table[hash(key)]</text>
+  <text x="700" y="115" text-anchor="middle" font-size="11">→ ポインタ = <tspan font-weight="bold">0xY</tspan> (更新)</text>
+
+  <line x1="700" y1="135" x2="700" y2="170" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="600" y="175" width="200" height="70" fill="#daf0da" stroke="#080"/>
+  <text x="700" y="195" text-anchor="middle" font-size="11" font-weight="bold" fill="#080">item_B @ 0xY (new)</text>
+  <text x="700" y="215" text-anchor="middle" font-size="11">value = <tspan font-weight="bold">"1"</tspan></text>
+  <text x="700" y="232" text-anchor="middle" font-size="10" fill="#666">refcount = 1</text>
+
+  <rect x="600" y="270" width="200" height="70" fill="#ffe0e0" stroke="#c00" stroke-dasharray="4,3"/>
+  <text x="700" y="290" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">item_A @ 0xX (残存)</text>
+  <text x="700" y="310" text-anchor="middle" font-size="11">value = <tspan font-weight="bold">"0" のまま</tspan></text>
+  <text x="700" y="327" text-anchor="middle" font-size="10" fill="#666">refcount 0 になったら slabs_free</text>
+</svg>
+<div class="caption">図 2.5: SET は「新アドレス Y に new_item を作り、hash table のポインタを X→Y に書き換える」。old_item (アドレス X) は refcount で保持され、参照が消えたら slab に返却</div>
+</div>
+
+<h2>2.5. SET は待たない — deferred free (遅延解放) 設計</h2>
+
+<p>SET が old_item を unlink する時、他 worker が old_item を read 中でも <strong>待たずに完了する</strong>。詳細を追う:</p>
+
+<h3>コードの実際</h3>
+
+<pre><code>void do_item_unlink(item *it, const uint32_t hv) {
+    <b>if ((it-&gt;it_flags &amp; ITEM_LINKED) != 0) {</b>   // ← まだ hash table にリンクされているか
+        it-&gt;it_flags &amp;= ~ITEM_LINKED;              // フラグを消す
+        assoc_delete(...)                              // hash table から削除
+        item_unlink_q(it)                              // LRU から削除
+        do_item_remove(it)                             // ← refcount-- してみる
+    }
+}
+
+void do_item_remove(item *it) {
+    <b>if (refcount_decr(it) == 0) {</b>              // atomic 減算、結果が 0 なら
+        item_free(it);                                 // slab に返却 (slabs_lock 取る)
+    }
+    // refcount ≠ 0 なら何もしない (待たない、そのまま return)
+}</code></pre>
+
+<h3>2 つの条件文の意味</h3>
+
+<table>
+<tr><th>条件</th><th>意味</th><th>なぜ必要</th></tr>
+<tr><td><code>(it-&gt;it_flags &amp; ITEM_LINKED) != 0</code></td><td>「まだ hash table に登録されているか」<br>ビット AND で LINKED フラグを抽出</td><td>二重 unlink 防止 (別スレッドが既に削除済みなら何もしない)</td></tr>
+<tr><td><code>refcount_decr(it) == 0</code></td><td>「refcount を 1 減らして、結果が 0 か」<br>atomic 演算で減算</td><td>0 になった時だけ free (誰も参照してない = 安全に破棄可)</td></tr>
+</table>
+
+<h3>「以下を実行」の具体的な中身 (6 ステップ)</h3>
+
+<p><code>do_item_unlink</code> の <code>if</code> ブロック内でやっていること全部:</p>
+
+<pre><code>void do_item_unlink(item *it, const uint32_t hv) {
+    if ((it-&gt;it_flags &amp; ITEM_LINKED) != 0) {
+        <b>① it-&gt;it_flags &amp;= ~ITEM_LINKED;</b>          // LINKED フラグを消す
+        STATS_LOCK();
+        <b>② stats_state.curr_bytes -= ITEM_ntotal(it);</b>  // stats: バイト数を減らす
+        <b>   stats_state.curr_items -= 1;</b>              // stats: item 数を減らす
+        STATS_UNLOCK();
+        <b>③ item_stats_sizes_remove(it);</b>              // サイズ別統計から除外
+        <b>④ assoc_delete(ITEM_key(it), it-&gt;nkey, hv);</b>  // hash table から削除
+        <b>⑤ item_unlink_q(it);</b>                         // LRU リンクから外す
+        <b>⑥ do_item_remove(it);</b>                        // refcount--、0 なら item_free
+    }
+}</code></pre>
+
+<table>
+<tr><th>ステップ</th><th>操作</th><th>意味</th></tr>
+<tr><td>①</td><td>LINKED フラグを消す</td><td>次に unlink されないようにマーク (二重削除防止の準備)</td></tr>
+<tr><td>②</td><td>stats のカウンタ更新</td><td>memcached 全体の item 数・バイト数の統計</td></tr>
+<tr><td>③</td><td>サイズ別統計から除外</td><td>size buckets の内部 stats</td></tr>
+<tr><td>④</td><td><b>hash table から削除</b></td><td>hash_table[key] のエントリを消す = <b>以降 hash 経由でアクセス不可</b></td></tr>
+<tr><td>⑤</td><td>LRU リンクから外す</td><td>LRU リスト (heads/tails) から削除、eviction 対象外</td></tr>
+<tr><td>⑥</td><td>refcount-- (0 なら item_free)</td><td>参照カウント減算、0 なら実際にメモリ返却</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>要約</strong>: 「item を memcached の管理下から外す作業一式」。
+特に <strong>④ hash table 削除</strong> と <strong>⑤ LRU 削除</strong> がメイン。
+その後 <strong>⑥ で refcount--</strong> して 0 なら実解放、0 じゃなければ (誰か読んでるので) そのまま。
+</div>
+
+<h3>光の質問への回答 (追加分)</h3>
+
+<div class="warn-box">
+<strong>Q</strong>: 最後に参照を手放した人が削除するとのことだが、read している側は「これが古い値かどうか」を判断できるのか？<br><br>
+
+<strong>A</strong>: <strong>No、read 側は判断できない</strong> (そして memcached はそれを気にしない設計)。
+
+<br><br>詳細:
+<ul>
+  <li>worker0 (GET) は item_A のポインタを取得したら、item_lock 解放後にそのまま value を read してレスポンス送信</li>
+  <li>この間、別スレッドが SET で item_A を unlink して LINKED フラグを消しても、worker0 は <strong>flags を再チェックしない</strong></li>
+  <li>worker0 は「自分が掴んだ item の内容」をそのまま client に送る</li>
+  <li>その値が「memcached の最新値」かは <strong>worker0 には知る術がない</strong></li>
+</ul>
+
+<br>ただし以下は保証される:
+<ul>
+  <li>✅ <strong>メモリ安全性</strong>: read 中の item は refcount ≥ 1 なので絶対 free されない (dangling pointer なし)</li>
+  <li>✅ <strong>データ整合性</strong>: item の value は immutable なので、read 中に内容が書き換わることはない</li>
+  <li>❌ <strong>最新性</strong>: 並列 SET 中に古い値を返す可能性あり (linearizability なし)</li>
+</ul>
+
+<br>これは memcached の設計選択 (キャッシュとしての高スループット優先)。
+「絶対に最新の値」が必要な用途 (残高管理など) には向かないが、
+「多少古くても OK な高速キャッシュ」としては最適な設計。
+</div>
+
+<h3>コードで見ると GET は flags 再チェックしていない</h3>
+
+<pre><code>// thread.c: GET の実装
+item *item_get(const char *key, const size_t nkey, ...) {
+    hv = hash(key, nkey);
+    item_lock(hv);
+    it = do_item_get(...);        // it_flags を確認して refcount++
+    item_unlock(hv);
+    return it;                     // ← ここでポインタを返す
+}
+// この後の read フローで it_flags は <b>一切再チェックされない</b>
+// 呼び出し元は it の value をそのまま client に送信する</code></pre>
+
+<h3>refcount が 0 じゃない時のフロー</h3>
+
+<div class="figure">
+<svg viewBox="0 0 900 420" xmlns="http://www.w3.org/2000/svg">
+  <text x="450" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    deferred free: 誰も待たず、最後の参照者が free する
+  </text>
+
+  <!-- Timeline -->
+  <line x1="140" y1="350" x2="820" y2="350" stroke="#333" stroke-width="2"/>
+  <text x="140" y="370" font-size="11">t=0</text>
+  <text x="820" y="370" text-anchor="end" font-size="11">time</text>
+
+  <!-- worker0 (GET) -->
+  <text x="30" y="70" font-size="11" font-weight="bold" fill="#080">worker0</text>
+  <text x="30" y="86" font-size="10" fill="#666">(GET)</text>
+
+  <rect x="140" y="55" width="60" height="25" class="lock-region"/>
+  <text x="170" y="72" text-anchor="middle" font-size="10">🔒 lock</text>
+  <text x="140" y="102" font-size="9" fill="#080">refcount++ (=2)</text>
+
+  <rect x="205" y="55" width="230" height="25" class="free-region"/>
+  <text x="320" y="72" text-anchor="middle" font-size="10">🔓 item_A を read → response 送信 (時間かかる)</text>
+
+  <rect x="440" y="55" width="80" height="25" class="lock-region"/>
+  <text x="480" y="72" text-anchor="middle" font-size="10">🔒 remove</text>
+  <text x="440" y="102" font-size="9" fill="#080">refcount-- (=0)</text>
+  <text x="440" y="115" font-size="9" fill="#c00">→ item_free!</text>
+
+  <!-- worker1 (SET) -->
+  <text x="30" y="170" font-size="11" font-weight="bold" fill="#c00">worker1</text>
+  <text x="30" y="186" font-size="10" fill="#666">(SET)</text>
+
+  <rect x="220" y="155" width="40" height="25" class="slabs-region"/>
+  <text x="240" y="172" text-anchor="middle" font-size="10">🔒 alloc</text>
+
+  <rect x="262" y="155" width="70" height="25" class="free-region"/>
+  <text x="297" y="172" text-anchor="middle" font-size="10">🔓 memcpy</text>
+
+  <rect x="334" y="155" width="70" height="25" class="lock-region"/>
+  <text x="369" y="172" text-anchor="middle" font-size="10">🔒 store</text>
+  <text x="336" y="145" font-size="9" fill="#c00">unlink old_item</text>
+  <text x="336" y="195" font-size="9" fill="#c00">refcount-- (=1)</text>
+  <text x="336" y="207" font-size="9" fill="#c00">← 0 ではない, free しない</text>
+
+  <rect x="406" y="155" width="200" height="25" class="free-region"/>
+  <text x="506" y="172" text-anchor="middle" font-size="10">🔓 "STORED" を client 送信 (即完了)</text>
+
+  <!-- Explanation area -->
+  <text x="450" y="255" text-anchor="middle" font-size="12" font-weight="bold" fill="#c00">
+    worker1 (SET) は refcount = 1 のまま item_unlock → STORED 送信 → 完了
+  </text>
+  <text x="450" y="275" text-anchor="middle" font-size="12" fill="#333">
+    (SET は old_item の free 完了を待たない、待機は 0 サイクル)
+  </text>
+  <text x="450" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#080">
+    worker0 (GET) が read 完了 → item_remove → refcount 0 → 最後の参照者として item_free 実行
+  </text>
+  <text x="450" y="320" text-anchor="middle" font-size="12" fill="#333">
+    (「最後に参照を手放した人」が cleanup 責任を負う)
+  </text>
+</svg>
+<div class="caption">図 2.7: deferred free — SET は待たない、最後に参照を手放した worker が free する</div>
+</div>
+
+<h3>光の質問への直接回答</h3>
+
+<div class="ok-box">
+<strong>Q</strong>: refcount が 0 じゃない時、ゼロになるまで待つのか？<br>
+<strong>Q</strong>: SET リクエストの完了 (client への返信) は refcount 0 まで保留か？<br><br>
+<strong>A</strong>:
+<ul>
+  <li><strong>待たない</strong> (待機コードは存在しない)</li>
+  <li>SET は refcount_decr してみて、0 じゃなければ「何もせず」item_unlock して STORED を送信</li>
+  <li>クライアントへの返信は <strong>即座に</strong> 行われる (数十 cy 内)</li>
+  <li>old_item の実際の free は「最後に参照を手放した worker」が行う</li>
+  <li>これが memcached の高スループット設計の鍵: <strong>「他スレッドを待たない」ことでロック保持時間を最小化</strong></li>
+</ul>
+</div>
+
+<h2>2.6. 「削除」の実体 — リンク削除とメモリ解放は別物</h2>
+
+<p>
+  「最後に read した人が削除する」と説明したが、これは正確ではなかった。実際には <strong>2 段階の「削除」</strong> が存在し、
+  それぞれ別のスレッドが担当する。
+</p>
+
+<h3>2 つの「削除」の内訳</h3>
+
+<table>
+<tr><th>処理</th><th>誰が実行</th><th>いつ</th><th>何をする</th></tr>
+<tr><td><strong>① hash table のリンク削除 (unlink)</strong></td><td><strong>SET を実行した worker (worker1)</strong></td><td>SET の item_lock 内で</td><td><code>assoc_delete</code> で hash table から削除、LRU からも外す、LINKED フラグを消す</td></tr>
+<tr><td><strong>② 実メモリの解放 (item_free = slab 返却)</strong></td><td><strong>最後に参照を手放した worker (worker0)</strong></td><td>GET の read 完了後、item_remove を呼んで</td><td><code>refcount--</code> して 0 になったら <code>item_free</code> → slab に返却</td></tr>
+</table>
+
+<div class="warn-box">
+<strong>重要</strong>: 最後に read した worker は「リンク削除」は<strong>一切しない</strong>。
+それは既に SET で完了済み。最後の read が担当するのは <strong>メモリ返却だけ</strong>。
+</div>
+
+<h3>タイムラインで見る (2 つの削除の区別)</h3>
+
+<div class="figure">
+<svg viewBox="0 0 900 500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+
+  <text x="450" y="25" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    リンク削除 (SET が実行) と メモリ解放 (最後の read が実行) の分離
+  </text>
+
+  <!-- 時系列 -->
+  <text x="60" y="55" font-size="11" font-weight="bold" fill="#333">t=0 初期状態</text>
+  <rect x="60" y="65" width="200" height="60" fill="#f4f6f8" stroke="#333"/>
+  <text x="160" y="85" text-anchor="middle" font-size="11">hash_table[key] → item_A</text>
+  <text x="160" y="100" text-anchor="middle" font-size="11">item_A: LINKED, refcount=1</text>
+  <text x="160" y="115" text-anchor="middle" font-size="10" fill="#666">(hash table 経由でアクセス可)</text>
+
+  <line x1="280" y1="90" x2="330" y2="90" stroke="#333" stroke-width="1.5" marker-end="url(#arr4)"/>
+
+  <text x="380" y="55" font-size="11" font-weight="bold" fill="#080">t=1 worker0 (GET)</text>
+  <rect x="340" y="65" width="220" height="60" fill="#daf0da" stroke="#080"/>
+  <text x="450" y="85" text-anchor="middle" font-size="11">hash_table 検索 → item_A 取得</text>
+  <text x="450" y="100" text-anchor="middle" font-size="11">refcount++ → refcount=2</text>
+  <text x="450" y="115" text-anchor="middle" font-size="10" fill="#666">(item_lock 解放後 read 中)</text>
+
+  <line x1="580" y1="90" x2="630" y2="90" stroke="#333" stroke-width="1.5" marker-end="url(#arr4)"/>
+
+  <text x="700" y="55" font-size="11" font-weight="bold" fill="#c00">t=2 worker1 (SET)</text>
+  <rect x="640" y="65" width="220" height="60" fill="#ffe0e0" stroke="#c00"/>
+  <text x="750" y="82" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">① リンク削除 実行</text>
+  <text x="750" y="98" text-anchor="middle" font-size="10">hash_table[key] → item_B</text>
+  <text x="750" y="113" text-anchor="middle" font-size="10">item_A unlink (refcount=1)</text>
+
+  <!-- t=3 -->
+  <text x="60" y="165" font-size="11" font-weight="bold" fill="#333">t=3 SET 完了後の状態</text>
+  <rect x="60" y="175" width="800" height="90" fill="#fafbfc" stroke="#333"/>
+  <text x="450" y="197" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">
+    hash_table[key] → item_B (新) │ item_A は hash 経由で見えないが worker0 のポインタで生存中
+  </text>
+  <text x="450" y="217" text-anchor="middle" font-size="11">
+    item_A の状態: LINKED フラグなし、refcount=1、メモリは まだ slab に存在
+  </text>
+  <text x="450" y="237" text-anchor="middle" font-size="11" fill="#c00">
+    worker1 (SET) は "STORED" 送信して完了 (item_A のメモリ回収は待たない)
+  </text>
+  <text x="450" y="255" text-anchor="middle" font-size="11" fill="#080">
+    worker0 (GET) は item_A の value を read 続行 (自分のポインタ経由)
+  </text>
+
+  <!-- t=4 -->
+  <text x="60" y="295" font-size="11" font-weight="bold" fill="#080">t=4 worker0 が read 完了</text>
+  <rect x="60" y="305" width="800" height="70" fill="#daf0da" stroke="#080"/>
+  <text x="450" y="325" text-anchor="middle" font-size="12" font-weight="bold" fill="#080">
+    ② メモリ解放 実行 (worker0 が担当)
+  </text>
+  <text x="450" y="345" text-anchor="middle" font-size="11">
+    worker0: item_remove(item_A) 呼ぶ → refcount_decr → 0 になった!
+  </text>
+  <text x="450" y="365" text-anchor="middle" font-size="11">
+    → item_free(item_A) 実行 → slab の空きリストに返却 → メモリ再利用可能に
+  </text>
+
+  <!-- t=5 -->
+  <text x="60" y="405" font-size="11" font-weight="bold" fill="#333">t=5 最終状態</text>
+  <rect x="60" y="415" width="800" height="70" fill="#f4f6f8" stroke="#333"/>
+  <text x="450" y="435" text-anchor="middle" font-size="11">
+    hash_table[key] → item_B  │  item_A のメモリは slab に返却済み (再利用可能)
+  </text>
+  <text x="450" y="455" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">
+    ① リンク削除は worker1 が実行、② メモリ解放は worker0 が実行 (別々の担当)
+  </text>
+  <text x="450" y="475" text-anchor="middle" font-size="11" fill="#666">
+    worker0 は「refcount--して 0 になった」ことで「自分が最後だ」と判断
+  </text>
+</svg>
+<div class="caption">図 2.9: リンク削除とメモリ解放は別の worker が別のタイミングで実行する</div>
+</div>
+
+<h3>「最後だと判断する仕組み」= refcount_decr の戻り値</h3>
+
+<pre><code>void do_item_remove(item *it) {
+    if (<b>refcount_decr(it) == 0</b>) {   // ← 減算後の値が 0 なら「自分が最後」
+        item_free(it);                     //   実際にメモリ返却
+    }
+    // 0 じゃなければ他にまだ参照者がいる → 何もしない
+}</code></pre>
+
+<p>
+  <code>refcount_decr</code> は <strong>atomic 演算</strong> で、複数スレッドが同時に呼んでも
+  「1 を引いた後の値」を <strong>自分だけ</strong> 見られる。
+  結果が 0 なら「自分が最後の参照者」= メモリ解放担当。
+  0 以外なら他がまだ持っている → 何もしない (次に参照を手放すスレッドに任せる)。
+</p>
+
+<h3>光の疑問への直接回答</h3>
+
+<div class="ok-box">
+<strong>Q</strong>: 最後に read した人が古い値を削除するとのことだが、最後に read が読んだ時にどうやってリンクを削除するの？<br><br>
+
+<strong>A</strong>: <strong>最後の read はリンク削除を一切しない</strong>。<br><br>
+
+説明:
+<ul>
+  <li>hash table の「リンク削除」= <strong>SET が既に完了させている</strong> (SET の item_lock 内で <code>assoc_delete</code> + <code>item_unlink_q</code> + LINKED フラグ消し)</li>
+  <li>最後の read (= worker0 が item_remove を呼ぶ時) がやるのは <strong>メモリ解放 (slab へ返却) のみ</strong></li>
+  <li>「最後だ」の判断は <code>refcount_decr()</code> の戻り値が 0 かどうかで自動判定</li>
+  <li>この段階では既に hash table からは item は消えているので、リンク操作は不要</li>
+</ul>
+</div>
+
+<h2>3. なぜロック外で読み書きしても安全か</h2>
+
+<p>光の疑問「値の読み書きがロック外って安全なの？」への答え。memcached の設計は以下の 2 つの仕組みで安全性を担保している:</p>
+
+<h3>仕組み A: item は immutable</h3>
+
+<ul>
+  <li>一度作られた item のデータ (value) は <strong>絶対に書き換えない</strong></li>
+  <li>SET で「値を変更」する時は、<strong>新しい item を作って hash table で置き換える</strong></li>
+  <li>古い item はそのまま残る (誰かが read 中の間は生き続ける)</li>
+</ul>
+
+<h3>仕組み B: refcount による寿命管理</h3>
+
+<ul>
+  <li>GET で item を取得する時、<code>refcount_incr(item)</code> で参照カウント++</li>
+  <li>参照カウントが 1 以上の間、item は <strong>絶対に free されない</strong></li>
+  <li>read が終わったら <code>item_remove(item)</code> で refcount--</li>
+  <li>refcount が 0 になったら <strong>その時に初めて</strong> slabs_free で解放</li>
+</ul>
+
+<div class="figure">
+<svg viewBox="0 0 900 340" xmlns="http://www.w3.org/2000/svg">
+  <text x="450" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    同じ key に GET と SET が同時に来た場合
+  </text>
+
+  <!-- Timeline -->
+  <line x1="60" y1="290" x2="840" y2="290" stroke="#333" stroke-width="2"/>
+  <text x="60" y="310" font-size="11">t=0</text>
+  <text x="840" y="310" text-anchor="end" font-size="11">time</text>
+
+  <!-- worker0 (GET) -->
+  <text x="30" y="65" font-size="11" font-weight="bold" fill="#080">worker0 (GET)</text>
+
+  <rect x="80" y="50" width="60" height="25" class="lock-region"/>
+  <text x="110" y="67" text-anchor="middle" font-size="10">🔒 lock</text>
+  <line x1="110" y1="75" x2="110" y2="285" stroke="#080" stroke-width="1" stroke-dasharray="2,2"/>
+  <text x="115" y="90" font-size="9" fill="#080">refcount++ (=1)</text>
+
+  <rect x="145" y="50" width="200" height="25" class="free-region"/>
+  <text x="245" y="67" text-anchor="middle" font-size="10">🔓 item データを read → response 送信中</text>
+  <line x1="345" y1="75" x2="345" y2="285" stroke="#080" stroke-width="1" stroke-dasharray="2,2"/>
+
+  <rect x="350" y="50" width="60" height="25" class="lock-region"/>
+  <text x="380" y="67" text-anchor="middle" font-size="10">🔒 remove</text>
+  <text x="415" y="65" font-size="9" fill="#080">refcount-- (=0)</text>
+
+  <!-- worker1 (SET) -->
+  <text x="30" y="140" font-size="11" font-weight="bold" fill="#c00">worker1 (SET)</text>
+
+  <rect x="80" y="125" width="60" height="25" class="slabs-region"/>
+  <text x="110" y="142" text-anchor="middle" font-size="10">🔒 alloc</text>
+
+  <rect x="145" y="125" width="80" height="25" class="free-region"/>
+  <text x="185" y="142" text-anchor="middle" font-size="10">🔓 memcpy</text>
+
+  <rect x="230" y="125" width="80" height="25" class="lock-region"/>
+  <text x="270" y="142" text-anchor="middle" font-size="10">🔒 store_item</text>
+  <text x="240" y="115" font-size="9" fill="#c00">old_item を unlink</text>
+  <text x="245" y="167" font-size="9" fill="#c00">refcount-- (=old_it は 1)</text>
+
+  <!-- Explanation -->
+  <text x="450" y="220" text-anchor="middle" font-size="12" fill="#333">
+    worker0 が old_item を保持中 (refcount=1) に worker1 が SET → new_item に置き換え
+  </text>
+  <text x="450" y="240" text-anchor="middle" font-size="12" fill="#333">
+    old_item は hash table から外れるが、worker0 の refcount で生存 → free されない
+  </text>
+  <text x="450" y="260" text-anchor="middle" font-size="12" font-weight="bold" fill="#080">
+    worker0 は安全に old_item を読み続けられる
+  </text>
+</svg>
+<div class="caption">図 3: 同じ key に GET と SET が同時に来ても、refcount で古い item は保持される</div>
+</div>
+
+<div class="ok-box">
+<strong>結論</strong>: 「値の読み書きがロック外」= <strong>immutable + refcount</strong> のおかげで安全。
+ロック保持時間を最小化することで、並列度を最大化している。
+</div>
+
+<h2>4. PAUSE で待っているのはどの部分か</h2>
+
+<p>PAUSE を挟むのは <strong>ロック取得試行 (spinlock_lock) の中</strong>:</p>
+
+<pre><code>static inline void spinlock_lock(spinlock_t *sl) {
+    for (int round = 0; round &lt; 30; round++) {
+        if (pthread_mutex_trylock(&sl-&gt;mutex) == 0)   // trylock 試行
+            return;                                       // 成功 → CS へ
+        for (int p = 0; p &lt; N; p++) {                  // 失敗
+            cpu_relax();                                  // ← ここが PAUSE
+        }
+    }
+    pthread_mutex_lock(&sl-&gt;mutex);                    // 30 回失敗 → futex 経由
+}</code></pre>
+
+<p>つまり:</p>
+<ol>
+  <li>他 worker が item_lock を保持中に、worker0 が SET/GET で同じ item_lock を取ろうとする</li>
+  <li>trylock 失敗 → <strong>N 個の PAUSE 実行</strong> (待機)</li>
+  <li>また trylock 試行 → 失敗 → 再度 PAUSE... を最大 30 回繰り返す</li>
+  <li>30 回失敗したら futex 経由でスリープ (これは最後の手段)</li>
+</ol>
+
+<h2>5. PAUSE で改善しようとしているのはどこの処理か</h2>
+
+<div class="highlight-box">
+<strong>改善対象</strong>: item_lock の獲得競争 (図 1 の ③、図 2 の ② と ⑥)
+<br><br>
+具体的な改善内容:
+<ul>
+  <li><strong>N=0 (PAUSE なし)</strong>: 30 回連続で trylock を叩く → cacheline A の pingpong 激しい → unlock latency 悪化</li>
+  <li><strong>N を増やす</strong>: trylock 間隔が空く → cacheline A の pingpong 頻度減 → unlock latency 改善 → 全体 QPS 向上</li>
+  <li><strong>N が大きすぎる</strong>: trylock 間隔が広すぎ → unlock 検知が遅れる → 待ち時間の絶対値が増える → 全体 QPS 悪化</li>
+</ul>
+どこかに <strong>最適な N</strong> があり、それはロック競合の激しさ (= CS 内処理時間 × スレッド数) で決まる。
+</div>
+
+<h2>6. 並列できる部分と排他される部分</h2>
+
+<div class="figure">
+<svg viewBox="0 0 900 400" xmlns="http://www.w3.org/2000/svg">
+  <text x="450" y="20" text-anchor="middle" font-size="15" font-weight="bold" fill="#333">
+    並列実行できる部分 (緑) と 排他される部分 (赤/青)
+  </text>
+
+  <!-- Timeline for 4 workers -->
+  <line x1="140" y1="360" x2="840" y2="360" stroke="#333" stroke-width="2"/>
+  <text x="140" y="380" font-size="11">t=0</text>
+
+  <!-- worker 0 -->
+  <text x="30" y="70" font-size="12" font-weight="bold">worker0</text>
+  <text x="30" y="86" font-size="10" fill="#666">(GET)</text>
+  <rect x="140" y="50" width="80" height="30" class="free-region"/>
+  <text x="180" y="70" text-anchor="middle" font-size="10">recv+parse</text>
+  <rect x="220" y="50" width="30" height="30" class="lock-region"/>
+  <text x="235" y="70" text-anchor="middle" font-size="9">🔒</text>
+  <rect x="250" y="50" width="120" height="30" class="free-region"/>
+  <text x="310" y="70" text-anchor="middle" font-size="10">read + send</text>
+  <rect x="370" y="50" width="80" height="30" class="free-region"/>
+  <text x="410" y="70" text-anchor="middle" font-size="10">recv+parse</text>
+  <rect x="450" y="50" width="30" height="30" class="lock-region"/>
+  <text x="465" y="70" text-anchor="middle" font-size="9">🔒</text>
+
+  <!-- worker 1 -->
+  <text x="30" y="140" font-size="12" font-weight="bold">worker1</text>
+  <text x="30" y="156" font-size="10" fill="#666">(SET)</text>
+  <rect x="140" y="120" width="60" height="30" class="free-region"/>
+  <text x="170" y="140" text-anchor="middle" font-size="10">recv+parse</text>
+  <rect x="200" y="120" width="25" height="30" class="slabs-region"/>
+  <text x="212" y="140" text-anchor="middle" font-size="9">🔒</text>
+  <rect x="225" y="120" width="70" height="30" class="free-region"/>
+  <text x="260" y="140" text-anchor="middle" font-size="10">memcpy</text>
+  <rect x="295" y="120" width="35" height="30" class="lock-region"/>
+  <text x="312" y="140" text-anchor="middle" font-size="9">🔒</text>
+  <rect x="330" y="120" width="90" height="30" class="free-region"/>
+  <text x="375" y="140" text-anchor="middle" font-size="10">send</text>
+
+  <!-- worker 2 -->
+  <text x="30" y="210" font-size="12" font-weight="bold">worker2</text>
+  <text x="30" y="226" font-size="10" fill="#666">(GET)</text>
+  <rect x="180" y="190" width="80" height="30" class="free-region"/>
+  <text x="220" y="210" text-anchor="middle" font-size="10">recv+parse</text>
+  <rect x="260" y="190" width="30" height="30" class="lock-region"/>
+  <text x="275" y="210" text-anchor="middle" font-size="9">🔒</text>
+  <rect x="290" y="190" width="120" height="30" class="free-region"/>
+  <text x="350" y="210" text-anchor="middle" font-size="10">read + send</text>
+
+  <!-- worker 3 -->
+  <text x="30" y="280" font-size="12" font-weight="bold">worker3</text>
+  <text x="30" y="296" font-size="10" fill="#666">(SET)</text>
+  <rect x="160" y="260" width="60" height="30" class="free-region"/>
+  <text x="190" y="280" text-anchor="middle" font-size="10">recv+parse</text>
+  <rect x="220" y="260" width="25" height="30" class="slabs-region"/>
+  <text x="232" y="280" text-anchor="middle" font-size="9">🔒</text>
+  <rect x="245" y="260" width="70" height="30" class="free-region"/>
+  <text x="280" y="280" text-anchor="middle" font-size="10">memcpy</text>
+  <rect x="315" y="260" width="35" height="30" class="lock-region"/>
+  <text x="332" y="280" text-anchor="middle" font-size="9">🔒</text>
+  <rect x="350" y="260" width="90" height="30" class="free-region"/>
+  <text x="395" y="280" text-anchor="middle" font-size="10">send</text>
+
+  <!-- Legend -->
+  <rect x="500" y="330" width="20" height="15" class="free-region"/>
+  <text x="525" y="343" font-size="11" fill="#080">並列可能 (ロック外)</text>
+  <rect x="640" y="330" width="20" height="15" class="lock-region"/>
+  <text x="665" y="343" font-size="11" fill="#c00">item_lock 排他</text>
+  <rect x="770" y="330" width="20" height="15" class="slabs-region"/>
+  <text x="795" y="343" font-size="11" fill="#06c">slabs_lock 排他</text>
+</svg>
+<div class="caption">図 4: 4 workers が並列に動く様子。緑部分は全員同時に実行できる、赤/青部分は 1 worker のみ</div>
+</div>
+
+<h3>比率で見ると</h3>
+
+<table>
+<tr><th>領域</th><th>時間比率 (実測から推定)</th><th>並列度</th></tr>
+<tr><td>ロック外 (recv, parse, memcpy, read, send)</td><td>大半 (95%+)</td><td>4 workers 並列</td></tr>
+<tr><td>item_lock 内 (hash table 操作)</td><td>数%</td><td>1 worker のみ</td></tr>
+<tr><td>slabs_lock 内 (メモリ管理)</td><td>数%</td><td>1 worker のみ</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>要点</strong>: memcached は「ロック保持時間を最小化して並列度を最大化する」設計。
+PAUSE で改善しようとしているのは、この <strong>少ないロック競合部分での cacheline pingpong と待機効率</strong> であって、
+「値の読み書きの時間」ではない。
+</div>
+
+<h2>7. Consistency (一貫性) の話 - 更新前の値を読む可能性</h2>
+
+<p>
+  「GET → SET → GET の順で送ると、2 回目の GET は更新前の値を読む可能性があるのか？」への回答。
+</p>
+
+<h3>ケース A: client が同期的に送る場合 (前の完了を待って次を送る)</h3>
+
+<pre><code>t1: GET1  → server が "0" 返信
+t2: (client は "0" を受け取ってから次を送る)
+t3: SET(1) → server が "STORED" 返信
+t4: (client は "STORED" を受け取ってから次を送る)
+t5: GET2  → server が "1" 返信</code></pre>
+
+<div class="ok-box">
+このパターンでは <strong>GET2 は必ず "1"</strong> を返す。順序が守られている。
+</div>
+
+<h3>ケース B: 並列に送る場合 (mutilate の pipeline が実態)</h3>
+
+<p>GET2 が SET の完了を待たずに送信されると、SET と GET2 が memcached サーバー内で <strong>並列に処理</strong> される。この時、GET2 が古い値を返す可能性がある:</p>
+
+<div class="figure">
+<svg viewBox="0 0 900 360" xmlns="http://www.w3.org/2000/svg">
+  <text x="450" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">
+    並列 SET & GET で古い値が返るケース
+  </text>
+
+  <!-- Timeline -->
+  <line x1="140" y1="290" x2="820" y2="290" stroke="#333" stroke-width="2"/>
+  <text x="140" y="310" font-size="11">t=0</text>
+  <text x="820" y="310" text-anchor="end" font-size="11">time</text>
+
+  <!-- worker0 (GET2) -->
+  <text x="30" y="70" font-size="11" font-weight="bold" fill="#080">worker0</text>
+  <text x="30" y="86" font-size="10" fill="#666">(GET2)</text>
+
+  <rect x="140" y="55" width="50" height="25" class="lock-region"/>
+  <text x="165" y="72" text-anchor="middle" font-size="10">🔒 lock</text>
+  <text x="140" y="45" font-size="9" fill="#c00">assoc_find → item_A</text>
+  <text x="140" y="102" font-size="9" fill="#c00">refcount++ (item_A=1)</text>
+
+  <rect x="195" y="55" width="220" height="25" class="free-region"/>
+  <text x="305" y="72" text-anchor="middle" font-size="10">🔓 item_A を read → "0" を送信</text>
+
+  <rect x="420" y="55" width="60" height="25" class="lock-region"/>
+  <text x="450" y="72" text-anchor="middle" font-size="10">🔒 remove</text>
+  <text x="490" y="72" font-size="9" fill="#080">refcount-- (=0)</text>
+
+  <!-- worker1 (SET) -->
+  <text x="30" y="180" font-size="11" font-weight="bold" fill="#c00">worker1</text>
+  <text x="30" y="196" font-size="10" fill="#666">(SET(1))</text>
+
+  <rect x="140" y="165" width="50" height="25" class="slabs-region"/>
+  <text x="165" y="182" text-anchor="middle" font-size="10">🔒 alloc</text>
+
+  <rect x="195" y="165" width="60" height="25" class="free-region"/>
+  <text x="225" y="182" text-anchor="middle" font-size="10">🔓 memcpy</text>
+
+  <rect x="260" y="165" width="80" height="25" class="lock-region"/>
+  <text x="300" y="182" text-anchor="middle" font-size="10">🔒 store_item</text>
+  <text x="260" y="155" font-size="9" fill="#c00">hash_table[key] = item_B</text>
+  <text x="265" y="207" font-size="9" fill="#c00">item_A unlink (refcount=1)</text>
+
+  <rect x="345" y="165" width="140" height="25" class="free-region"/>
+  <text x="415" y="182" text-anchor="middle" font-size="10">🔓 "STORED" 送信</text>
+
+  <!-- Explanation -->
+  <text x="450" y="255" text-anchor="middle" font-size="12" fill="#333">
+    worker0 は SET 完了後も、掴んだ item_A (value=0) を read → <strong>"0" を返す</strong>
+  </text>
+  <text x="450" y="275" text-anchor="middle" font-size="12" fill="#333">
+    hash_table[key] は既に item_B を指しているが、worker0 は自分のポインタ経由で item_A を読んでいる
+  </text>
+</svg>
+<div class="caption">図 5: SET 完了後でも、SET 前に GET が item_A を「掴んで」いれば古い値を返す</div>
+</div>
+
+<div class="warn-box">
+<strong>結論</strong>: memcached は <strong>linearizability を保証しない</strong>。並列に SET と GET を送ると、GET が古い値を返すことがある。ただし client が同期的に (前の完了を待って) 送信すれば順序は守られる。
+</div>
+
+<h3>Consistency 保証の一覧</h3>
+
+<table>
+<tr><th>プロパティ</th><th>保証</th><th>説明</th></tr>
+<tr><td><strong>メモリ安全性</strong> (use-after-free 等)</td><td>✅ 保証</td><td>refcount で item の寿命を管理</td></tr>
+<tr><td><strong>hash table の一貫性</strong></td><td>✅ 保証</td><td>item_lock で書き換えを排他</td></tr>
+<tr><td><strong>client 内の順序保持</strong> (sequential consistency 相当)</td><td>✅ 保証</td><td>client が同期送信すれば順序通り</td></tr>
+<tr><td><strong>並列 SET/GET の linearizability</strong></td><td>❌ 保証しない</td><td>SET 完了後の GET が古い値を返す可能性</td></tr>
+</table>
+
+<h3>なぜこの設計なのか</h3>
+
+<ul>
+  <li>memcached は <strong>キャッシュ</strong> なので、厳密な linearizability より <strong>スループット優先</strong></li>
+  <li>ロック保持を最小化 (hash table 操作のみ) して並列度を最大化</li>
+  <li>immutable item + refcount で「壊れない」ことは保証、「最新である」ことは緩い</li>
+  <li>キャッシュとして使う限り、一時的に古い値が見えても問題ない (最終的には収束する)</li>
+  <li>厳密な一貫性が必要な用途 (銀行残高など) には RDBMS などを使う</li>
+</ul>
+
+<h2>まとめ</h2>
+
+<ul>
+  <li>光の元の想定「ロック取って値を読み書きして解放」= 半分正しい</li>
+  <li>正確には「ロック取ってメタデータ (hash table や refcount) 更新して即解放、値の read/write はロック外」</li>
+  <li>ロック外で安全な理由 = <strong>immutable item + refcount</strong> による寿命管理</li>
+  <li>PAUSE は item_lock/slabs_lock 取得試行の失敗時に挟む</li>
+  <li>PAUSE で改善しようとしているのは <strong>ロック cacheline の pingpong 頻度と unlock 検知遅延のバランス</strong></li>
+  <li>並列できるのは 95%+ (ロック外の処理)、排他される数% (CS 内) が競合ボトルネック</li>
+</ul>
+
+<hr>
+<p style="color: #666; font-size: 0.9em; text-align: right;">
+  作成: 2026-09-10 / 関連資料: <code>spinlock_cacheline.html</code>, <code>workload_symmetry.html</code>, <code>pipeline_back_pressure.html</code>, <code>cs_measurement_issue.html</code>
+</p>
+
+</body>
+</html>

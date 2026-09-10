@@ -2,7 +2,7 @@
 # Usage: python3 experiment/plot_cdf_comparison.py [--data-dir DIR] [--output OUT] [--labels N ...]
 # パラメータ:
 #   --data-dir: raw/*.log を含むディレクトリ
-#               (default: experiment/results/skylake/utdelay_sweep_c220g5_skylake/raw)
+#               (default: experiment/results/archive/20260910/misc/skylake/utdelay_sweep_c220g5_skylake/raw)
 #   --output:   出力ファイルパス (default: experiment/results/cdf_latency_skylake.pdf)
 #   --labels:   比較するN値のリスト (default: master 0 4 10 100 200)
 # 出力先: experiment/results/cdf_latency_skylake.pdf
@@ -143,7 +143,7 @@ def main():
     )
     parser.add_argument(
         "--data-dir",
-        default="experiment/results/skylake/utdelay_sweep_c220g5_skylake/raw",
+        default="experiment/results/archive/20260910/misc/skylake/utdelay_sweep_c220g5_skylake/raw",
         help="Directory containing raw/*.log files"
     )
     parser.add_argument(

@@ -11,7 +11,7 @@
 #
 # Prerequisites:
 #   pip install matplotlib numpy
-#   experiment/results/utdelay_p999_20260625_140735/raw.csv が存在すること
+#   experiment/results/archive/20260910/misc/utdelay_p999_20260625_140735/raw.csv が存在すること
 
 import os
 import re
@@ -21,7 +21,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-RESULT_DIR = "experiment/results/utdelay_p999_20260702_112351"
+RESULT_DIR = "experiment/results/archive/20260910/misc/utdelay_p999_20260702_112351"
 OUT_PATH   = "experiment/results/p999_sweep.pdf"
 
 TITLE_SUFFIX = (

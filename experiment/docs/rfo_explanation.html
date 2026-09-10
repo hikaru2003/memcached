@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>RFO とは何か - Read For Ownership 解説</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+    max-width: 960px;
+    margin: 2em auto;
+    padding: 0 1.5em;
+    line-height: 1.7;
+    color: #222;
+  }
+  h1 { border-bottom: 3px solid #333; padding-bottom: 0.3em; }
+  h2 { border-left: 5px solid #4a7ac9; padding-left: 0.5em; margin-top: 2.5em; }
+  h3 { color: #333; margin-top: 1.8em; }
+  code, pre {
+    font-family: "SF Mono", Consolas, Menlo, monospace;
+    background: #f4f6f8;
+    border-radius: 3px;
+  }
+  code { padding: 2px 5px; font-size: 0.9em; }
+  pre {
+    padding: 1em;
+    overflow-x: auto;
+    border: 1px solid #d0d7de;
+    line-height: 1.5;
+  }
+  .figure {
+    margin: 1.5em 0;
+    text-align: center;
+    background: #fafbfc;
+    padding: 1em;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+  }
+  .caption {
+    font-size: 0.9em;
+    color: #57606a;
+    margin-top: 0.5em;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+  }
+  th, td {
+    border: 1px solid #d0d7de;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  th { background: #f4f6f8; }
+  .highlight-box {
+    background: #fffbdd;
+    border-left: 4px solid #d4a72c;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .warn-box {
+    background: #ffebe9;
+    border-left: 4px solid #cf222e;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>RFO (Read For Ownership) とは何か</h1>
+
+<p>
+  memcached の実験で頻出する <strong>RFO</strong> について、なぜ発生するか、何を意味するか、
+  実験でどう計測しているかをまとめる。
+</p>
+
+<h2>1. 一言で言うと</h2>
+
+<div class="highlight-box">
+<strong>RFO (Read For Ownership)</strong> = 「他コアが持っているキャッシュラインを、自分のコアで書き込むために <strong>M 権 (排他所有権) を取り直す</strong>要求」。
+<br><br>
+書き込み (store) の直前に発行される。多発すると <strong>コア間のキャッシュライン争奪 (バス競合)</strong>
+が激しいことを意味する。
+</div>
+
+<h2>2. なぜ RFO が必要か (MESI プロトコル)</h2>
+
+<p>Intel CPU は各キャッシュラインに MESI 状態を持たせている:</p>
+
+<table>
+<tr><th>状態</th><th>意味</th><th>書き込み可能?</th></tr>
+<tr><td><strong>M</strong> (Modified)</td><td>このコアだけが持ち、書き換え済み</td><td>✅ 可</td></tr>
+<tr><td><strong>E</strong> (Exclusive)</td><td>このコアだけが持ち、書き換え前</td><td>✅ 可 (M に遷移)</td></tr>
+<tr><td><strong>S</strong> (Shared)</td><td>複数コアが同一内容を持てる</td><td>❌ <strong>不可</strong> (RFO 必要)</td></tr>
+<tr><td><strong>I</strong> (Invalid)</td><td>無効</td><td>❌ 不可 (RFO 必要)</td></tr>
+</table>
+
+<div class="warn-box">
+<strong>ルール</strong>: キャッシュラインを書き換えるには <strong>M または E 状態</strong>で持つ必要がある。
+<br>
+S や I 状態の line に書き込もうとすると、<strong>RFO を発行して他コアの line を invalidate</strong> し、
+自分が M 状態を取得しなければならない。
+</div>
+
+<h2>3. RFO の具体的な発生シナリオ</h2>
+
+<h3>シナリオ A: 通常の atomic 変数への書き込み</h3>
+
+<pre><code>// Core A で実行
+counter++;   // 内部で: load counter → increment → store counter
+             //         ↑ store 時に RFO 発行</code></pre>
+
+<p>
+  もし <code>counter</code> の cacheline が他コアで S や I 状態なら、
+  Core A は RFO を発行して M 権を取る。
+</p>
+
+<h3>シナリオ B: LOCK CMPXCHG (spinlock の trylock)</h3>
+
+<pre><code>// pthread_mutex_trylock の内部
+lock cmpxchg mutex, ...   // atomic RMW (Read-Modify-Write)</code></pre>
+
+<p>
+  LOCK-prefix 付き命令は <strong>成功/失敗に関わらず</strong> 対象アドレスの cacheline を
+  <strong>M 権で取ろうとする</strong>。つまり <strong>trylock 1 回 = RFO 1 回</strong>。
+</p>
+
+<div class="highlight-box">
+<strong>これが spinlock 実装で RFO が多発する理由</strong>: 30 rounds の trylock ループで、
+成功するまで毎回 RFO を発行 → 他コアの cacheline を invalidate → pingpong 発生。
+</div>
+
+<h3>シナリオ C: memcached での RFO 発生源</h3>
+
+<p>1 リクエスト処理中に RFO が発生する主な箇所:</p>
+
+<ol>
+  <li><strong>spinlock_trylock() の LOCK CMPXCHG</strong>: 30 rounds まで繰り返し</li>
+  <li><strong>pthread_mutex_unlock() の atomic store</strong>: ロック解放時 1 回</li>
+  <li><strong>item の refcount 更新</strong>: <code>refcount_incr / refcount_decr</code> (atomic RMW)</li>
+  <li><strong>hash table のエントリ書き換え</strong>: SET 時の pointer update</li>
+  <li><strong>LRU list のリンク更新</strong>: item アクセスごと</li>
+  <li><strong>stats カウンタ</strong>: 各種統計の書き換え</li>
+</ol>
+
+<h2>4. RFO の測定方法</h2>
+
+<p>Intel の Performance Monitoring Unit (PMU) で計測可能:</p>
+
+<table>
+<tr><th>アーキ</th><th>perf イベント名</th></tr>
+<tr><td>Broadwell / Ice Lake</td><td><code>offcore_requests.demand_rfo</code></td></tr>
+<tr><td>Emerald Rapids</td><td><code>l2_rqsts.rfo_miss</code> (offcore_requests.demand_rfo は N/A)</td></tr>
+<tr><td>Skylake ann</td><td><code>offcore_requests.demand_rfo</code></td></tr>
+</table>
+
+<div class="warn-box">
+<strong>注意</strong>: <code>demand_rfo</code> は「L1/L2 でヒットしなかった RFO」を数える (offcore、つまり L3 以降へ問い合わせに行ったもの)。<strong>L1 hit RFO は含まない</strong>。
+真の RFO 総数はもっと多いが、通常 offcore RFO が「他コアと争奪した回数」の指標になる。
+</div>
+
+<h2>5. 実験での RFO 解釈</h2>
+
+<h3>RFO/req = 1 リクエストあたりの RFO 発行数</h3>
+
+<pre><code>RFO/req = (総 RFO 数 / 総 request 数)</code></pre>
+
+<p>これが大きいほど、1 リクエスト処理中に他コアとの cacheline 争奪が多く発生している。</p>
+
+<h3>Skylake ann の実測値の例</h3>
+
+<table>
+<tr><th>N</th><th>RFO/req</th><th>解釈</th></tr>
+<tr><td>0 (tight spin)</td><td>62</td><td>30 rounds の trylock + 他の atomic 操作でハイ</td></tr>
+<tr><td>1</td><td>70 (ピーク)</td><td>QPS が伸びるので RFO 総数も増える (RFO/req もわずかに増)</td></tr>
+<tr><td>10</td><td>50</td><td>trylock 頻度減で RFO 減</td></tr>
+<tr><td>200</td><td>32</td><td>大幅に減 (trylock 間隔が広い)</td></tr>
+</table>
+
+<h2>6. RFO と QPS の関係</h2>
+
+<div class="highlight-box">
+一般に:
+<ul>
+  <li>RFO 多 → cacheline pingpong 激しい → L2/L3 帯域圧迫、コアの stall 増 → QPS 悪化</li>
+  <li>RFO 少 → cacheline が安定 → QPS 良好</li>
+</ul>
+ただし memcached の spinlock 実験では <strong>RFO 減少と QPS 改善は完全には一致しない</strong>:
+<ul>
+  <li>N=0 → N=200 で RFO は単調減少 (62→32)</li>
+  <li>しかし QPS 山形は N=4 でピークで、その後緩やかに悪化</li>
+  <li><strong>→ RFO 減少は QPS 改善の一因だが、唯一の要因ではない</strong> (他に unlock latency、handoff latency 等が絡む)</li>
+</ul>
+</div>
+
+<h2>7. 「バス競合」との関係</h2>
+
+<p>
+  「バス競合」は一般用語で、複数コアが同じキャッシュラインを奪い合う現象。
+  RFO はその <strong>操作的な指標</strong> (=書き込みのための M 権取得回数)。
+  RFO が多い = バス競合が多い、と読める。
+</p>
+
+<p>厳密には:</p>
+<ul>
+  <li><strong>RFO</strong>: 書き込み前の M 権取得要求 (回数)</li>
+  <li><strong>HITM</strong>: 他コアの M state から自分に move された cacheline (受信側の指標)</li>
+  <li><strong>バス帯域</strong>: 単位時間あたりの cacheline 移動量</li>
+</ul>
+
+<hr>
+<p style="color: #666; font-size: 0.9em; text-align: right;">
+  作成: 2026-09-10 / 関連資料: <code>spinlock_cacheline.html</code>, <code>research_summary.html</code>
+</p>
+
+</body>
+</html>

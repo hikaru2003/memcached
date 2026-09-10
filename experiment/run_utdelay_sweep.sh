@@ -18,11 +18,11 @@
 #   DEPTH                  - mutilate pipeline depth (-d)    (default: 32)
 #   RECORDS                - key range (-r)                  (default: 1)
 #   UPDATE_RATIO           - SET 割合 (-u)                   (default: 0.5)
-#   WARMUP_SEC             - warmup 秒数                    (default: 300)
+#   WARMUP_SEC             - warmup 秒数                    (default: 120)
 #   DURATION               - 計測秒数                       (default: 60)
-#   RUNS                   - 各 N のラン数                   (default: 20)
+#   RUNS                   - 各 N のラン数                   (default: 30)
 #   SPIN_ROUNDS            - trylock 試行回数（固定）         (default: 30)
-#   PAUSE_PER_ROUND_VALUES - N sweep 値                     (default: 0..10 + 15,20,30,50,80,100,150,200)
+#   PAUSE_PER_ROUND_VALUES - N sweep 値                     (default: 40点 [0-18全整数, 20-30 2刻み, 33-60 密, 70-200 疎])
 #   PORT                   - memcached ポート               (default: 11222)
 #   MC_CPUS                - memcached CPU affinity         (default: 0-3)
 #   WL_CPUS                - mutilate CPU affinity          (default: 4-7)
@@ -50,11 +50,11 @@ MUT_CONNS="${MUT_CONNS:-1}"
 DEPTH="${DEPTH:-32}"
 RECORDS="${RECORDS:-1}"
 UPDATE_RATIO="${UPDATE_RATIO:-0.5}"
-WARMUP_SEC="${WARMUP_SEC:-300}"
+WARMUP_SEC="${WARMUP_SEC:-120}"
 DURATION="${DURATION:-60}"
-RUNS="${RUNS:-20}"
+RUNS="${RUNS:-30}"
 SPIN_ROUNDS="${SPIN_ROUNDS:-30}"
-PAUSE_PER_ROUND_VALUES="${PAUSE_PER_ROUND_VALUES:-0 1 2 3 4 5 6 7 8 9 10 15 20 30 50 80 100 150 200}"
+PAUSE_PER_ROUND_VALUES="${PAUSE_PER_ROUND_VALUES:-0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 20 22 24 26 28 30 33 36 40 45 50 55 60 70 80 90 100 125 150 175 200}"
 PORT="${PORT:-11222}"
 MC_CPUS="${MC_CPUS:-0-3}"
 WL_CPUS="${WL_CPUS:-4-7}"

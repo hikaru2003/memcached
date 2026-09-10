@@ -5,3 +5,6 @@
 !.gitignore
 !experiment/
 !experiment/**
+
+# 過去実験の生データ archive (11GB) は git 管理外、ann サーバのローカル参照専用
+experiment/results/archive/

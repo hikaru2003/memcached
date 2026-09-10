@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>PAUSE スピン最適化研究 - 中間まとめ (2026-09-10)</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+    max-width: 1080px;
+    margin: 2em auto;
+    padding: 0 1.5em;
+    line-height: 1.7;
+    color: #222;
+  }
+  h1 { border-bottom: 3px solid #333; padding-bottom: 0.4em; }
+  h2 {
+    border-left: 6px solid #4a7ac9;
+    padding-left: 0.6em;
+    margin-top: 2.5em;
+    background: linear-gradient(90deg, #f0f6fc 0%, transparent 60%);
+  }
+  h3 { color: #333; margin-top: 1.8em; border-bottom: 1px solid #ddd; padding-bottom: 0.2em; }
+  h4 { color: #555; margin-top: 1.4em; }
+  code, pre {
+    font-family: "SF Mono", Consolas, Menlo, monospace;
+    background: #f4f6f8;
+    border-radius: 3px;
+  }
+  code { padding: 2px 5px; font-size: 0.9em; }
+  pre {
+    padding: 1em;
+    overflow-x: auto;
+    border: 1px solid #d0d7de;
+    line-height: 1.5;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+  }
+  th, td {
+    border: 1px solid #d0d7de;
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f4f6f8; font-weight: 600; }
+  .figure {
+    margin: 1.5em 0;
+    text-align: center;
+    background: #fafbfc;
+    padding: 1em;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+  }
+  .figure img { border: 1px solid #ccc; max-width: 100%; height: auto; }
+  .caption {
+    font-size: 0.9em;
+    color: #57606a;
+    margin-top: 0.5em;
+    font-style: italic;
+  }
+  .highlight-box {
+    background: #fffbdd;
+    border-left: 5px solid #d4a72c;
+    padding: 1em 1.2em;
+    margin: 1em 0;
+    border-radius: 4px;
+  }
+  .warn-box {
+    background: #ffebe9;
+    border-left: 5px solid #cf222e;
+    padding: 1em 1.2em;
+    margin: 1em 0;
+    border-radius: 4px;
+  }
+  .ok-box {
+    background: #dafbe1;
+    border-left: 5px solid #1a7f37;
+    padding: 1em 1.2em;
+    margin: 1em 0;
+    border-radius: 4px;
+  }
+  .section-A {
+    background: #eff6ff;
+    border-radius: 8px;
+    padding: 1em 1.5em;
+    margin: 1em 0;
+    border: 2px solid #4a7ac9;
+  }
+  .section-B {
+    background: #fef3f2;
+    border-radius: 8px;
+    padding: 1em 1.5em;
+    margin: 1em 0;
+    border: 2px solid #cf222e;
+  }
+  .toc {
+    background: #f4f6f8;
+    padding: 1em 1.5em;
+    border-radius: 6px;
+    margin: 1.5em 0;
+  }
+  .toc ol { margin: 0.5em 0; padding-left: 1.5em; }
+  .toc a { text-decoration: none; color: #0969da; }
+  .toc a:hover { text-decoration: underline; }
+  .summary-badge {
+    display: inline-block;
+    background: #4a7ac9;
+    color: white;
+    padding: 0.15em 0.6em;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: bold;
+    margin-right: 0.5em;
+  }
+  .badge-B { background: #cf222e; }
+  .stage-badge {
+    display: inline-block;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    font-size: 0.85em;
+    font-weight: bold;
+    margin-right: 0.3em;
+  }
+  .stage1 { background: #ccebc5; color: #2d572c; }
+  .stage2 { background: #fff2b3; color: #7a5f00; }
+  .stage3 { background: #fbb4b4; color: #8b1e1e; }
+</style>
+</head>
+<body>
+
+<h1>PAUSE スピン最適化研究 - 中間まとめ</h1>
+<p style="color: #666;">
+  作成日: 2026-09-10 / 対象: 研究室での進捗共有・議論用
+</p>
+
+<div class="highlight-box">
+<strong>本資料の目的</strong>: これまで実施してきた PAUSE スピン最適化研究の中で、
+<strong>根拠として意味のある結果に絞って</strong> 体系的に整理し、
+先生・先輩との今後の方針議論の材料とする。
+</div>
+
+<h2>目次</h2>
+
+<div class="toc">
+<ol>
+  <li><a href="#background">研究背景と目的</a></li>
+  <li><a href="#environment">実験環境</a></li>
+  <li><a href="#result-A"><span class="summary-badge">研究結果A</span> 複数アーキ間比較</a>
+    <ol>
+      <li><a href="#a-pause-cycle">各アーキの PAUSE 実行サイクル数</a></li>
+      <li><a href="#a-qps">QPS 山形のアーキ間差</a></li>
+      <li><a href="#a-handoff">handoff latency のアーキ間差</a></li>
+      <li><a href="#a-analysis">分析と考察</a></li>
+    </ol>
+  </li>
+  <li><a href="#result-B"><span class="summary-badge badge-B">研究結果B</span> Skylake ann 単体詳細分析</a>
+    <ol>
+      <li><a href="#b-unlock">unlock latency 実験</a></li>
+      <li><a href="#b-3stage">QPS 山形の 3 段階解釈</a></li>
+      <li><a href="#b-futex">補助データ: futex 落ち回数の激減</a></li>
+      <li><a href="#b-rfo">補助データ: RFO (バス競合) の変化</a></li>
+      <li><a href="#b-cs">補助データ: CS 長分布の傍証</a></li>
+      <li><a href="#b-analysis">分析と考察</a></li>
+    </ol>
+  </li>
+  <li><a href="#conclusion">わかったこと / 未解明の点</a></li>
+  <li><a href="#next-steps">今後の方針</a></li>
+  <li><a href="#references">補足資料</a></li>
+</ol>
+</div>
+
+<h2 id="background">1. 研究背景と目的</h2>
+
+<h3>1.1 背景</h3>
+
+<p>データセンタでは複数世代の CPU アーキテクチャが混在して稼働しているが、アプリケーションはアーキテクチャの違いを考慮せず同一設定で動作している。特に <strong>PAUSE 命令</strong> の実行サイクル数はアーキテクチャによって最大 12 倍以上異なる:</p>
+
+<table>
+<tr><th>アーキテクチャ</th><th>PAUSE 実行サイクル (-O2 実測)</th></tr>
+<tr><td>Broadwell</td><td>~10 cy</td></tr>
+<tr><td>Ice Lake</td><td>~39 cy</td></tr>
+<tr><td>Emerald Rapids</td><td>~37 cy</td></tr>
+<tr><td><strong>Skylake</strong></td><td><strong>~124 cy</strong> (異常に大きい)</td></tr>
+</table>
+
+<h3>1.2 研究目的</h3>
+
+<div class="highlight-box">
+<strong>目的</strong>: memcached のスピンロックにおいて、PAUSE 挿入回数 N とスループット QPS の関係を、
+以下の 2 つの視点から明らかにする:
+
+<ol>
+  <li><strong>アーキ間比較</strong>: 同じアプリケーション設定で、アーキごとに最適 N と挙動がどう違うか</li>
+  <li><strong>単一アーキ (Skylake ann) 詳細</strong>: PAUSE 回数を変化させた時のスループットとレイテンシの関係、そのメカニズムは何か</li>
+</ol>
+</div>
+
+<h2 id="environment">2. 実験環境</h2>
+
+<h3>2.1 CPU アーキテクチャ一覧</h3>
+
+<table>
+<tr><th>サーバ</th><th>マイクロアーキ</th><th>ベースクロック</th><th>物理コア数</th><th>備考</th></tr>
+<tr><td>xl170 (cloudlab)</td><td>Broadwell (E5-2640 v4)</td><td>2.4 GHz</td><td>10</td><td>ring bus, inclusive L3</td></tr>
+<tr><td>sm110 (cloudlab)</td><td>Ice Lake (Silver 4314)</td><td>2.4 GHz</td><td>16</td><td>mesh, non-inclusive L3</td></tr>
+<tr><td>c6620 (cloudlab)</td><td>Emerald Rapids (Gold 5512U)</td><td>-</td><td>-</td><td>mesh</td></tr>
+<tr><td><strong>ann</strong> (研究室)</td><td>Skylake (Silver 4110)</td><td>2.1 GHz</td><td>8</td><td>mesh, 詳細分析対象</td></tr>
+</table>
+
+<h3>2.2 共通実験条件</h3>
+
+<ul>
+  <li><strong>アプリケーション</strong>: memcached (自作 spinlock 実装、MySQL InnoDB 型)</li>
+  <li><strong>ワークロード</strong>: mutilate (単一 key、SET/GET 50/50)</li>
+  <li><strong>環境</strong>: SMT off、周波数固定 (base clock)、turbo off (ann は BIOS で設定)</li>
+  <li><strong>スピン実装</strong>: <code>[trylock + PAUSE×N] × 30 rounds → futex fallback</code></li>
+</ul>
+
+<hr>
+
+<div class="section-A">
+
+<h2 id="result-A"><span class="summary-badge">研究結果A</span> 複数アーキ間比較</h2>
+
+<p style="font-size: 1.05em;">
+<strong>研究の問い</strong>: 同じアプリケーション設定 (memcached, スピンロック実装, ワークロード) で、
+異なる CPU アーキテクチャを走らせた時、スループットや最適 PAUSE 回数はどう変わるか？
+</p>
+
+<h3 id="a-pause-cycle">A.1 各アーキの PAUSE 実行サイクル数</h3>
+
+<p>まず基本情報として、各アーキで PAUSE 命令が消費するサイクル数を単体実測 (<code>pause_cycle_count.c</code> を -O2 コンパイル、taskset で 1 コアに固定して測定)。単一の代表値なので表で提示する。</p>
+
+<table>
+<tr><th>アーキ</th><th>PAUSE cy</th><th>base clock</th><th>PAUSE 実時間</th></tr>
+<tr><td>Broadwell</td><td>10.05 cy</td><td>2400 MHz</td><td>4.2 ns</td></tr>
+<tr><td>Ice Lake</td><td>38.74 cy</td><td>2400 MHz</td><td>16.1 ns</td></tr>
+<tr><td>Emerald Rapids</td><td>37.16 cy</td><td>-</td><td>-</td></tr>
+<tr><td><strong>Skylake</strong></td><td><strong>124.20 cy</strong></td><td>2100 MHz</td><td><strong>59.1 ns</strong> (最も長い)</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>ここから伝えたい主張</strong>: Skylake は他アーキの 3〜12 倍長い PAUSE サイクル。
+同じ N でも実際のスピン待ち時間 (絶対時間) は大きく異なる。この事実が、以降の「アーキごとに最適 N が違う」議論の前提となる。
+</div>
+
+
+<h3 id="a-qps">A.2 QPS 山形のアーキ間差</h3>
+
+<p>N を 0 から 200 まで sweep した時の QPS の変化を各アーキで比較する。<strong>このグラフを載せる目的は、アーキごとの最適 N (peak 位置) が明確に違うことを示すため</strong>。</p>
+
+<div class="figure">
+  <img src="imgs/qps_comparison-1.png" alt="qps_comparison">
+  <div class="caption">図 A.2: QPS vs PAUSE 回数 N (アーキ間比較)</div>
+</div>
+
+<h4>具体的な peak 位置</h4>
+
+<table>
+<tr><th>アーキ</th><th>PAUSE cycle</th><th>peak N</th><th>peak QPS</th><th>vs N=0 での改善</th></tr>
+<tr><td>Skylake</td><td>124 cy</td><td><strong>N=5</strong></td><td>933k</td><td>+21%</td></tr>
+<tr><td>Ice Lake (Sunny Cove)</td><td>39 cy</td><td><strong>N=15</strong></td><td>1514k</td><td>+54%</td></tr>
+<tr><td>Emerald Rapids</td><td>37 cy</td><td><strong>N=30</strong></td><td>1325k</td><td>+16%</td></tr>
+<tr><td>Broadwell</td><td>10 cy</td><td><strong>N=45</strong></td><td>1414k</td><td>+21%</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>ここから伝えたい主張</strong>: 最適 N はアーキで <strong>9 倍</strong> (Skylake=5 → Broadwell=45) 違う。
+また同じ N で運用すると、Ice Lake は +54% の改善余地を失う可能性がある。
+<strong>アーキごとに N を調整する必要がある</strong>ことが明確に示されている。
+</div>
+
+<h4>PAUSE budget で正規化した比較</h4>
+
+<p>次に「N × PAUSE cy = スピン時間 (サイクル)」で正規化する。<strong>このグラフを載せる目的は、「PAUSE cycle で正規化すれば全アーキで peak が揃うか？」を検証するため</strong>。もし完全に揃えば、PAUSE cycle だけがアーキ間差の原因と結論できる。</p>
+
+<div class="figure">
+  <img src="imgs/qps_normalized_pause_budget_zoom-1.png" alt="qps_normalized_pause_budget_zoom">
+  <div class="caption">図 A.3a: 横軸を PAUSE budget (= N × PAUSE cy) にノーマライズした QPS (peak 周辺を拡大: 0-2500 cy)。各アーキの peak N と budget 値を縦点線で明示</div>
+</div>
+
+<div class="figure">
+  <img src="imgs/qps_normalized_pause_budget-1.png" alt="qps_normalized_pause_budget">
+  <div class="caption">図 A.3b: 同じデータの全体像 (0-25000 cy)。Skylake だけ N=200 まで plot されているが、右側の長い減少カーブは重要ではない (参考)</div>
+</div>
+
+<h4>具体的な peak 位置 (PAUSE budget 換算)</h4>
+
+<table>
+<tr><th>アーキ</th><th>peak N</th><th>peak PAUSE budget (cy)</th><th>他アーキとの差</th></tr>
+<tr><td>Broadwell</td><td>N=45</td><td><strong>450 cy</strong></td><td>基準</td></tr>
+<tr><td>Ice Lake</td><td>N=15</td><td><strong>585 cy</strong></td><td>Broadwell の 1.3 倍</td></tr>
+<tr><td>Skylake</td><td>N=5</td><td><strong>620 cy</strong></td><td>Broadwell の 1.4 倍</td></tr>
+<tr><td>Emerald Rapids</td><td>N=30</td><td><strong>1110 cy</strong></td><td><strong>Broadwell の 2.5 倍 (突出)</strong></td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>ここから伝えたい主張</strong>:
+<ul>
+  <li>Broadwell / IceLake / Skylake の 3 アーキは <strong>450-620 cy 範囲</strong>に peak が集中 → PAUSE budget での正規化がある程度機能</li>
+  <li>ただし完全一致ではなく <strong>1.4 倍のばらつき</strong>が残る</li>
+  <li>特に <strong>Emerald Rapids だけ突出して大きい (1115 cy)</strong> → PAUSE cycle 以外の要因が明らかに存在</li>
+</ul>
+つまり <strong>「PAUSE cycle だけ考慮すれば全アーキで同じ peak が得られる」は成立しない</strong>。
+アーキ間差の真の要因は今回の一連の実験では特定できておらず、今後の検証課題。
+</div>
+
+<h3 id="a-handoff">A.3 handoff latency のアーキ間差</h3>
+
+<p>ロック解放 → 次のスレッドが獲得するまでのレイテンシ (handoff latency) を各アーキで比較。<strong>このグラフを載せる目的は 2 つ</strong>: (1) アーキごとに handoff の絶対値が違うこと、(2) 特に N=0 (PAUSE 無し条件) でも差があること、を示すため。</p>
+
+<div class="figure">
+  <img src="imgs/handoff_p50_p99-1.png" alt="handoff_p50_p99">
+  <div class="caption">図 A.4: handoff latency p50 (左) と p99 (右) のアーキ間比較</div>
+</div>
+
+<h4>このグラフから読み取れる具体的な数値</h4>
+
+<table>
+<tr><th>アーキ</th><th>p50 最小値 (µs) と N</th><th>p99 最小値 (µs) と N</th></tr>
+<tr><td>Sunny Cove (Ice Lake)</td><td>0.24 @ N=25</td><td>2.1 @ N=25</td></tr>
+<tr><td>Emerald Rapids</td><td>0.27 @ N=25</td><td>2.5 @ N=25</td></tr>
+<tr><td>Broadwell</td><td>0.33 @ N=25</td><td>8.5 @ N=25 (高い)</td></tr>
+<tr><td>Skylake</td><td>0.35 @ N=10 (最小)、以降悪化</td><td>3.0 @ N=10</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>ここから伝えたい主張 (実測データから確実に言えること)</strong>:
+<ul>
+  <li><strong>p50 は Sunny Cove / Emerald が最速 (~570 cy)、Skylake が最遅 (~740 cy)</strong> — 1.3 倍差</li>
+  <li><strong>Broadwell の p99 だけ突出して高い (~30k cy、他 3 アーキは 5-12k cy)</strong> — 3〜6 倍差</li>
+  <li><strong>Skylake は N が大きくなると p50 が悪化</strong> (N=10 で 738 cy → N=200 で 837 cy)、他アーキと異なる挙動</li>
+</ul>
+<em>※ これらの原因 (L3 topology / ring vs mesh / cache 動作等) は候補として考えられるが、
+今回の一連の実験では検証していない。</em>
+<br><br>
+<em>※ 表示単位について: 各アーキで動作周波数が異なるため (Broadwell/IceLake 2.4 GHz, Emerald/Skylake 2.1 GHz)、
+µs 表示だと同じ ns 値でも異なる cycle 数を表す。ハードウェア動作の比較にはサイクル数表示を採用した。</em>
+</div>
+
+<div class="figure">
+  <img src="imgs/handoff_percentiles-1.png" alt="handoff_percentiles">
+  <div class="caption">図 A.5: handoff latency percentiles vs PAUSE 回数 N (アーキ別、p50 (青、左軸) / p99 (橙、右軸) / p999 (赤、右軸))</div>
+</div>
+
+<h4>このグラフから読み取れること</h4>
+
+<ul>
+  <li>Broadwell と Emerald Rapids はほぼ U 字型 (N=25 付近が最小、両端で悪化)</li>
+  <li>Sunny Cove も U 字型だが右側の悪化は緩やか</li>
+  <li>Skylake は N=10 付近で p50 最小、以降緩やかに悪化 (他アーキと異なる)</li>
+</ul>
+
+<div class="highlight-box">
+<strong>この 2 図から得られる本質的な観察</strong>: N=0 (PAUSE を全く挟まない tight spin) でも各アーキで
+handoff latency に差がある (p50: Ice 614 / Emerald 634 / Broadwell 800 / Skylake 890 cy)。
+PAUSE の影響が無い条件で差があるということは、<strong>PAUSE cycle 以外のアーキ固有の要因が存在する</strong>。
+これは前セクション (A.2) の「PAUSE budget での正規化でも Emerald だけ突出」という観察と整合的。
+<br><br>
+<em>※ この要因の正体は次の A.4 分析セクションで扱う (cache_miss 実験による RFO 量での説明を試みた結果、
+RFO 量では説明できないことが判明した)。</em>
+</div>
+
+<h3 id="a-analysis">A.4 分析と考察</h3>
+
+<h4>結果1: 最適 N は PAUSE サイクル数に反比例する</h4>
+
+<p>Skylake (124 cy) は N が小さくても十分なスピン時間を確保できる → 少ない N で peak。
+逆に Broadwell (10 cy) は十分なスピン時間を確保するには N を大きくする必要がある。</p>
+
+<div class="ok-box">
+<strong>実用的示唆</strong>: 同一の N 設定を全アーキで使うのは非最適。
+アーキごとに PAUSE サイクル数に応じた N 調整が必要。
+</div>
+
+<h4>結果2: N=0 の handoff latency にアーキ差がある</h4>
+
+<p>N=0 (tight spin、PAUSE を全く挟まない条件) でも handoff latency にアーキ差がある:</p>
+
+<table>
+<tr><th>アーキ</th><th>TSC (MHz)</th><th>N=0 handoff p50 (cy)</th><th>N=0 handoff p50 (µs 参考)</th></tr>
+<tr><td>Ice Lake (Sunny Cove)</td><td>2400</td><td>614</td><td>0.256</td></tr>
+<tr><td>Emerald Rapids</td><td>2100</td><td>634</td><td>0.302</td></tr>
+<tr><td>Broadwell</td><td>2400</td><td>800</td><td>0.333</td></tr>
+<tr><td>Skylake</td><td>2100</td><td><strong>890</strong></td><td><strong>0.424</strong></td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>ここから確実に言えること</strong>: N=0 では PAUSE の影響がないため、
+<strong>PAUSE cycle 数以外にアーキ固有の要因が handoff latency に影響している</strong>。
+差の絶対値は最大 1.45 倍 (Ice Lake 614 → Skylake 890 cy)。
+</div>
+
+<h4>その要因は何か? — RFO 量では説明できないことが判明</h4>
+
+<p>要因候補の一つとして <strong>cacheline 争奪 (RFO)</strong> を疑い、cache_miss sweep 実験で各アーキの RFO/req を実測した。もし「RFO が多いアーキ = handoff latency が長い」ならば、RFO 量が要因と特定できる。</p>
+
+<table>
+<tr><th>アーキ</th><th>N=0 handoff p50 (cy)</th><th>N=0 RFO/req (実測)</th><th>相関</th></tr>
+<tr><td>Ice Lake</td><td>614</td><td>~10</td><td>整合</td></tr>
+<tr><td>Emerald Rapids</td><td>634</td><td>~10</td><td>整合</td></tr>
+<tr><td>Broadwell</td><td>800</td><td>30-50 (Ice/Emerald の 3-5 倍)</td><td>整合</td></tr>
+<tr><td>Skylake</td><td>890</td><td>30-50 (Broadwell と同程度)</td><td>整合</td></tr>
+</table>
+
+<div class="warn-box">
+<strong>サイクル換算での再解釈</strong>: 元は µs 単位で「Broadwell と Emerald が近い (0.305 vs 0.303 µs)
+のに RFO 量が違うから RFO では説明できない」と結論していた。しかし各アーキで動作周波数が異なるため
+(Broadwell 2.4 GHz / Emerald 2.1 GHz)、<strong>サイクル数で見ると Broadwell 800 cy vs Emerald 634 cy
+と有意な差があり、この差は RFO 量の差と方向性が一致する</strong> (RFO 少 → cy 少、RFO 多 → cy 多)。
+<br><br>
+<strong>→ サイクル換算では RFO 量と handoff cy の間に正の相関が見える</strong>。ただし RFO 量の絶対値は
+アーキ間で 3-5 倍差なのに handoff cy 差は 1.4 倍程度なので、<strong>RFO は要因の一つだが単独では
+差の大きさを完全には説明できない</strong> (他要因: L3 topology, ring vs mesh, cacheline transfer レイテンシ等)。
+<br><br>
+つまり「アーキ固有の要因が存在する」ことは確定したが、
+その正体は今回の一連の実験では <strong>特定できていない</strong> (要今後検証)。
+</div>
+
+</div>
+
+<hr>
+
+<div class="section-B">
+
+<h2 id="result-B"><span class="summary-badge badge-B">研究結果B</span> Skylake ann 単体詳細分析</h2>
+
+<p style="font-size: 1.05em;">
+<strong>研究の問い</strong>: 1 つのアーキ (Skylake ann) に絞って、PAUSE 回数 N を変化させた時に
+QPS 山形が発生する<strong>メカニズム</strong>は何か？
+</p>
+
+<h3 id="b-unlock">B.1 unlock latency 実験</h3>
+
+<h4>実験内容</h4>
+
+<p><code>pthread_mutex_unlock</code> の実行時間を測定。この時間は「ロック cacheline (item_lock の変数) の M権を再取得するまでの時間」を含み、他コアの trylock による cacheline 争奪の激しさの指標になる。</p>
+
+<pre><code>static inline void spinlock_unlock(spinlock_t *sl) {
+    uint64_t t1 = rdtsc();
+    pthread_mutex_unlock(&sl-&gt;mutex);   // M権再取得 + store + (futex_wake if needed)
+    uint64_t t2 = rdtsc();
+    spinlock_record_unlock(t2 - t1);
+}</code></pre>
+
+<h4>結果: N とともに unlock latency は単調減少</h4>
+
+<p><strong>このグラフを載せる目的</strong>: unlock latency (= ロック cacheline の M権再取得コスト) が N の増加に対して単調に減少すること、特に N=0 → N=4 の急降下が大きいことを示すため。この形が次の「QPS 山形の 3 段階解釈」の根拠になる。</p>
+
+<p><strong>主軸に mean を使う理由</strong>: QPS (= 平均スループット) の山形を説明する指標としては、tail 値 (p99/p999) より <strong>mean が理論的に適切</strong> (QPS ≈ 4 workers / 平均 request 処理時間 で直接対応する)。tail は参考として併記する。</p>
+
+<div class="figure">
+  <img src="imgs/unlock_latency_vs_N-1.png" alt="unlock_latency_vs_N">
+  <div class="caption">図 B.1: unlock latency vs N (p50 / mean / p99 / p999)。mean (紫菱形) が QPS 説明の主指標</div>
+</div>
+
+<table>
+<tr><th>N</th><th>QPS (k)</th><th>unlock <strong>mean</strong> (µs)</th><th>unlock p50 (µs)</th><th>unlock p99 (µs)</th></tr>
+<tr><td>0</td><td>832</td><td><strong>0.29</strong></td><td>0.14</td><td>1.72</td></tr>
+<tr><td>1</td><td>870</td><td><strong>0.18</strong></td><td>0.15</td><td>0.61</td></tr>
+<tr><td>4 (QPS peak)</td><td>971</td><td><strong>0.13</strong></td><td>0.14</td><td>0.34</td></tr>
+<tr><td>10</td><td>960</td><td><strong>0.11</strong></td><td>0.08</td><td>0.32</td></tr>
+<tr><td>30</td><td>905</td><td><strong>0.08</strong></td><td>0.04</td><td>0.28</td></tr>
+<tr><td>200</td><td>712</td><td><strong>0.05</strong></td><td>0.03</td><td>0.22</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>このグラフから読み取れる重要な事実 (mean 基準)</strong>:
+<ul>
+  <li><strong>N=0 → N=4</strong>: mean が 0.29 → 0.13 µs (<strong>2.2倍改善</strong>) → 一番大きな変化はこの区間で発生</li>
+  <li><strong>N=4 → N=10</strong>: mean が 0.13 → 0.11 µs (<strong>微減</strong>) → 改善が飽和</li>
+  <li><strong>N=10 → N=200</strong>: mean が 0.11 → 0.05 µs (<strong>緩やかに継続減少</strong>)</li>
+</ul>
+この 3 段階の変化パターンが、次の QPS 山形の 3 段階解釈の直接の根拠となる。
+</div>
+
+<h3 id="b-3stage">B.2 QPS 山形の 3 段階解釈</h3>
+
+<p><strong>このグラフを載せる目的</strong>: QPS 山形と unlock latency の関係を 1 枚で見せることで、両者の対応関係 (どこまで unlock で説明でき、どこから説明できないか) を明確にするため。</p>
+
+<div class="figure">
+  <img src="imgs/unlock_qps_latency_2axis-1.png" alt="unlock_qps_latency_2axis">
+  <div class="caption">図 B.2: QPS (緑、左軸) と unlock latency <strong>mean</strong> (紫、右軸) の 2 軸プロット。背景色で 3 段階を可視化 (緑=Stage1、黄=Stage2、赤=Stage3)</div>
+</div>
+
+<h4>このグラフから読み取れること (Stage 別、mean 基準)</h4>
+
+<table>
+<tr><th>Stage</th><th>N 範囲</th><th>QPS 挙動</th><th>unlock latency mean</th><th>対応関係</th></tr>
+<tr><td><span class="stage-badge stage1">Stage 1</span></td><td>N=0 → N=4</td><td>832k → 971k (+17%)</td><td>0.29µs → 0.13µs (2.2倍改善)</td><td>✅ 明確な相関 (QPS 上昇と mean 急降下)</td></tr>
+<tr><td><span class="stage-badge stage2">Stage 2</span></td><td>N=4 → N=10</td><td>971k → 960k (plateau)</td><td>0.13µs → 0.11µs (微減)</td><td>✅ 相関維持 (両者とも大きな変化なし)</td></tr>
+<tr><td><span class="stage-badge stage3">Stage 3</span></td><td>N=10 → N=200</td><td>960k → 712k (-26%)</td><td>0.11µs → 0.05µs (さらに減少)</td><td>❌ 不整合 (QPS 悪化なのに mean は改善)</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>mean 基準にすることの意味</strong>: QPS は平均スループットなので、平均処理時間との対応を見るのが理論的に適切。
+p99 (tail) はロック競合の激しさの目安にはなるが、QPS の直接の説明変数にはならない。
+<br><br>
+Stage 1 の解釈は変わらない: <strong>mean unlock latency の 2.2 倍改善 (0.29→0.13µs) が QPS 17% 改善に寄与</strong>。
+Stage 3 の <strong>不整合の性質</strong>: mean は 0.11→0.05µs の 60ns 改善しかしていないのに、
+QPS は 26% 悪化 (960→712k)。60ns の unlock 改善では説明できない大きな悪化 → 別要因の存在を示唆。
+</div>
+
+<h3 id="b-futex">B.3 補助データ: futex 落ち回数の激減</h3>
+
+<p><strong>このグラフを載せる目的</strong>: Stage 1 (N=0 → N=4 の QPS 急上昇) を支える別の要因として、
+futex syscall 回数の激減があることを示すため。</p>
+
+<p><strong>実験内容</strong>: spinlock で 30 rounds トライしても取れない場合、futex にフォールバックしてスリープする。この futex syscall 発行回数 (per request) を N 毎に測定。</p>
+
+<div class="figure">
+  <img src="imgs/futex_ann-1.png" alt="futex_ann" style="max-width: 100%; height: auto; border: 1px solid #ccc;">
+  <div class="caption">図 B.3: futex syscall 回数 / request vs N (Skylake ann、master baseline は赤破線)</div>
+</div>
+
+<h4>具体的な数値 (Skylake ann、SET/GET 50/50)</h4>
+
+<table>
+<tr><th>N</th><th>futex/req</th><th>vs master 比</th></tr>
+<tr><td><strong>master</strong> (デフォルト = spin なし)</td><td><strong>1.68</strong></td><td>基準</td></tr>
+<tr><td>0 (spin だけ、PAUSE なし)</td><td>0.52</td><td>1/3.2</td></tr>
+<tr><td>1</td><td><strong>0.041</strong></td><td><strong>1/41 (12倍減)</strong></td></tr>
+<tr><td>5</td><td>0.002</td><td>1/840</td></tr>
+<tr><td>30</td><td>0.001</td><td>ほぼゼロ</td></tr>
+<tr><td>200</td><td>0.001</td><td>ほぼゼロ</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>このグラフから伝えたい主張</strong>:
+<ul>
+  <li>デフォルトの pthread_mutex 実装 (master) は 1 リクエストあたり <strong>1.68 回 futex 発行</strong> = カーネル遷移が頻繁</li>
+  <li>spin だけ (N=0) 追加すると <strong>1.68 → 0.52 に激減</strong> (30 rounds のリトライで大半救われる)</li>
+  <li>さらに N=1 の PAUSE を挟むと <strong>0.52 → 0.041 に激減</strong> (12倍減、spin phase が実効的に長くなり解放検知しやすくなる)</li>
+  <li>N≥5 では futex はほぼ発行されなくなる</li>
+</ul>
+Stage 1 の QPS 急上昇には <strong>futex カーネル遷移コストの削減</strong>も寄与している。
+ただし futex 減少は N=1 で既にほぼ完了しており、QPS peak (N=4) や Stage 3 の悪化とは直接一致しない。
+つまり <strong>QPS 改善の一因ではあるが、山形全体を説明する主要因ではない</strong>。
+</div>
+
+<h3 id="b-rfo">B.4 補助データ: RFO (バス競合) の変化</h3>
+
+<p><strong>このグラフを載せる目的</strong>: cacheline 争奪 (RFO/req) の減少が QPS 改善に寄与するか、
+どの Stage で効いているかを見るため。<br>
+<em>RFO の詳細は</em> <a href="rfo_explanation.html">rfo_explanation.html</a> <em>を参照。</em></p>
+
+<p><strong>実験内容</strong>: <code>offcore_requests.demand_rfo</code> (perf イベント) で 1 リクエストあたりの RFO 数を N 毎に測定。</p>
+
+<div class="warn-box">
+<strong>測定範囲の注意</strong>: <code>offcore_requests.demand_rfo</code> はコア単位の <strong>集計値</strong>で、
+特定のアドレス/ロックには絞れない。つまり以下すべてが混ざっている:
+<ul>
+  <li>spinlock (item_lock / slabs_lock) の LOCK CMPXCHG</li>
+  <li>pthread_mutex_unlock の atomic store</li>
+  <li>item refcount の incr/decr</li>
+  <li>hash table pointer 更新、LRU list 更新、stats カウンタ 等</li>
+</ul>
+本実験ではこれらの <strong>総和</strong>のみを扱い、内訳 (どのロック由来か、item_lock と slabs_lock の比率など) は特定していない。
+</div>
+
+<div class="figure">
+  <img src="imgs/rfo_ann-1.png" alt="rfo_ann" style="max-width: 100%; height: auto; border: 1px solid #ccc;">
+  <div class="caption">図 B.4: RFO / request vs N (Skylake ann、N=1 でピーク)</div>
+</div>
+
+<h4>具体的な数値 (Skylake ann)</h4>
+
+<table>
+<tr><th>N</th><th>RFO/req</th><th>vs N=0 比</th></tr>
+<tr><td>0 (tight spin)</td><td>62</td><td>基準</td></tr>
+<tr><td><strong>1</strong> (peak)</td><td><strong>70</strong></td><td>+13% (増加!)</td></tr>
+<tr><td>5</td><td>56</td><td>-10%</td></tr>
+<tr><td>10</td><td>50</td><td>-19%</td></tr>
+<tr><td>30</td><td>41</td><td>-34%</td></tr>
+<tr><td>200</td><td>32</td><td>-48%</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>このグラフから伝えたい主張</strong>:
+<ul>
+  <li>N=1 でむしろ RFO が増える (62 → 70)。理由: N=1 で QPS 自体が伸びる (単位時間あたりの処理量増) ため、RFO 総数も増える</li>
+  <li>N≥5 で RFO は単調に減少し、N=200 では N=0 の <strong>半分</strong>まで下がる</li>
+  <li>これは trylock 頻度が減ることによる cacheline pingpong 頻度の低下と整合的</li>
+</ul>
+QPS 山形との関係:
+<ul>
+  <li>RFO は N=200 まで単調減少 → QPS 山形右側 (Stage 3 で悪化) とは形が違う</li>
+  <li>つまり RFO 減少は Stage 1 + 2 の QPS 改善に寄与するが、Stage 3 の悪化を説明する要因ではない</li>
+  <li><strong>QPS 改善の一因ではあるが、山形全体を説明する主要因ではない</strong> (futex と同じ結論)</li>
+</ul>
+</div>
+
+<h3 id="b-cs">B.5 補助データ: CS 長分布の傍証</h3>
+
+<p>クリティカルセクション長 (spinlock 保持時間) を測定した結果、mean と p99 が N 増加とともに減少することが確認された。これは Stage 1/2 の改善を裏付ける傍証になる (cacheline pingpong 頻度減少の証拠):</p>
+
+<table>
+<tr><th>N</th><th>QPS (k)</th><th>CS 長 mean (cy)</th><th>CS 長 p99 (cy)</th></tr>
+<tr><td>0</td><td>780</td><td>268</td><td>1576</td></tr>
+<tr><td>5 (peak)</td><td>912</td><td>232</td><td>1444</td></tr>
+<tr><td>30</td><td>870</td><td>170</td><td>1380</td></tr>
+<tr><td>200</td><td>700</td><td>125</td><td>1246</td></tr>
+</table>
+
+<p style="color: #666; font-size: 0.9em;">
+※ CS 長は memcached 内の複数の spinlock (item_lock + slabs_lock) の混合値。ワークロード共通で N とともに減少する傾向は確認できたが、その詳細分解は今後の課題。
+</p>
+
+<h3 id="b-analysis">B.6 分析と考察</h3>
+
+<h4>Stage 1 (N=0 → N=4): 急上昇の説明</h4>
+
+<div class="ok-box">
+<strong>メカニズム</strong>:
+<ul>
+  <li>N=0 では 30 rounds 連続で trylock を叩く → ロック cacheline (A) を全 worker が奪い合う → pingpong 激しい</li>
+  <li>PAUSE を挟むと trylock 頻度が下がる → cacheline A の争奪頻度減 → <strong>unlock 時の M権再取得コスト大幅減</strong></li>
+  <li>結果: unlock latency p99 が 1.72µs → 0.34µs (5倍改善) → 全 request の処理時間短縮 → QPS 急上昇</li>
+</ul>
+</div>
+
+<h4>Stage 2 (N=4 → N=10): plateau の説明</h4>
+
+<div class="ok-box">
+Stage 1 の改善が飽和。unlock latency の変化が緩やか (0.34 → 0.32 µs) で、QPS もほぼ横ばい。両者の相関が維持されている。
+</div>
+
+<h4>Stage 3 (N=10 → N=200): 緩やかな低下 — handoff latency の悪化で説明可能</h4>
+
+<div class="ok-box">
+<strong>説明</strong>: この範囲では unlock latency はさらに改善しているのに QPS 悪化。
+これは <strong>unlock latency 以外の遅延要素</strong>の存在を意味する。
+その正体は <strong>handoff latency (release → 次スレッドの trylock 成功 までの時間) の悪化</strong>
+と考えられる。ann 単独データで見ると Skylake の handoff は N=10 付近で最小、以降 U 字型に悪化する:
+</div>
+
+<div class="figure">
+  <img src="imgs/handoff_ann-1.png" alt="handoff_ann" style="max-width: 100%; height: auto; border: 1px solid #ccc;">
+  <div class="caption">図 B.6: Skylake ann の handoff latency vs N (p50 (青、左軸) / p99 (橙、右軸) / p99.9 (赤、右軸))。p50 は N=10 で最小 (738 cy)、以降緩やかに悪化。</div>
+</div>
+
+<div class="ok-box">
+<strong>ann の具体的な数値</strong> (サイクル、TSC=2100 MHz):
+<ul>
+  <li>N=0:   p50 = 890 cy, p99 = 15617 cy, p99.9 = 15617 cy</li>
+  <li><strong>N=10:  p50 = 738 cy (最小)</strong>, p99 = 11977 cy</li>
+  <li>N=100: p50 = 838 cy, p99 = 17142 cy</li>
+  <li>N=200: p50 = 837 cy, <strong>p99 = 18124 cy, p99.9 = 30229 cy (N=10 比 2.5倍悪化)</strong></li>
+</ul>
+メカニズム: N が大きい → PAUSE ループ中に unlock が発生する確率が高い → 次の trylock 実行まで
+<strong>平均 N × PAUSE_cy / 2 の空振り時間</strong>が積み重なる → handoff latency が悪化 → QPS 低下。
+<br><br>
+<strong>unlock latency と handoff latency の切り分け</strong>:
+<ul>
+  <li>unlock latency: 「pthread_mutex_unlock の実行時間」= M権再取得コスト → N とともに<strong>単調減少</strong></li>
+  <li>handoff latency: 「release → 次獲得」= 上記 + PAUSE 待ち + trylock 実行 → <strong>U字型 (N=10 で最小)</strong></li>
+</ul>
+両者は別の遅延要素で、Stage 3 の悪化は handoff (特に PAUSE 待ち部分) が支配的。
+</div>
+
+</div>
+
+<hr>
+
+<h2 id="conclusion">6. わかったこと / 未解明の点</h2>
+
+<h3>6.1 わかったこと</h3>
+
+<ol>
+  <li><strong>アーキ間で最適 N は大きく異なる</strong> (PAUSE サイクル数に反比例する傾向)</li>
+  <li><strong>N=0 の handoff latency にもアーキ差がある</strong> (PAUSE 以外の要因の存在)</li>
+  <li><strong>Skylake ann の QPS 山形は 3 段階に分解できる</strong>:
+    <ul>
+      <li><span class="stage-badge stage1">Stage 1</span> 急上昇 = unlock latency mean の 2.2倍改善で説明</li>
+      <li><span class="stage-badge stage2">Stage 2</span> plateau = unlock latency mean 微減で維持</li>
+      <li><span class="stage-badge stage3">Stage 3</span> 緩やかな低下 = handoff latency の悪化で説明可能 (既存の handoff_sweep データより)</li>
+    </ul>
+  </li>
+  <li><strong>unlock latency と handoff latency は別の遅延要素</strong>: unlock は N 単調減少、handoff は U 字型</li>
+</ol>
+
+<h3>6.2 未解明の点</h3>
+
+<ol>
+  <li>N=0 でのアーキ間 handoff 差の要因 (RFO 量では説明できないことが実測で判明)</li>
+</ol>
+
+<h2 id="next-steps">7. 今後の方針</h2>
+
+<h3>7.1 短期 (次に実験すべき)</h3>
+
+<ol>
+  <li><strong>他アーキ (Broadwell / IceLake / Emerald) での Stage 分析</strong>
+    <ul>
+      <li>Skylake で観察された 3 段階構造が他アーキでも同じか</li>
+      <li>アーキごとに Stage 1/2/3 の境界 N がどうシフトするか</li>
+      <li>特に handoff latency の U字型 (最小位置) と QPS peak N の対応関係</li>
+    </ul>
+  </li>
+  <li><strong>unlock latency vs handoff latency の関係整理</strong>
+    <ul>
+      <li>両者は別の遅延要素 (unlock は M権再取得、handoff は PAUSE 待ち + 再取得)</li>
+      <li>QPS 山形の左側は unlock 改善、右側は handoff 悪化、が主要因の仮説を数値で裏付け</li>
+    </ul>
+  </li>
+</ol>
+
+<h3>7.2 長期 (研究成果としての方向性)</h3>
+
+<ol>
+  <li>アーキ特性から最適 N を予測する理論式の構築</li>
+  <li>アプリケーション実装での PAUSE 動的調整の実現可能性</li>
+</ol>
+
+<h2 id="references">8. 補足資料</h2>
+
+<h3>実装解説資料 (memcached コードの詳細理解用)</h3>
+
+<ul>
+  <li><a href="spinlock_cacheline.html">spinlock_cacheline.html</a> - MESI と cacheline の独立性</li>
+  <li><a href="request_flow_and_locking.html">request_flow_and_locking.html</a> - memcached のリクエスト処理フローとロック範囲</li>
+  <li><a href="rfo_explanation.html">rfo_explanation.html</a> - RFO (Read For Ownership) とは何か、実験での意味</li>
+  <li><a href="cs_measurement_issue.html">cs_measurement_issue.html</a> - CS 長測定の実態 (item_lock + slabs_lock 混合)</li>
+  <li><a href="workload_symmetry.html">workload_symmetry.html</a> - 対称ワークロードでの per-thread 分布</li>
+  <li><a href="pipeline_back_pressure.html">pipeline_back_pressure.html</a> - closed-loop workload の back-pressure</li>
+</ul>
+
+<h3>Notion ページ</h3>
+
+<ul>
+  <li><a href="https://app.notion.com/p/3d43263a102881bb97bcd4e0fcba48c5">ann サーバ環境設定</a></li>
+  <li><a href="https://app.notion.com/p/3d73263a102880188b29cf6d8f1e441d">memcached コード解説</a></li>
+  <li><a href="https://app.notion.com/p/3973263a1028803f9b36fe82438fbce5">cache miss / RFO 実験ページ</a></li>
+  <li><a href="https://app.notion.com/p/3cd3263a1028812a8201f892b9585e34">全体振り返り (2026-08-31)</a></li>
+</ul>
+
+<hr>
+<p style="color: #666; font-size: 0.9em; text-align: right;">
+  作成: 2026-09-10 / 対象実験期間: 2026-06 〜 2026-09-10
+</p>
+
+</body>
+</html>

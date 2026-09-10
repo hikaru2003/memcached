@@ -53,9 +53,11 @@ ARCH_INFO = {
 }
 
 RAW_CSV = {
-    "broadwell":   "experiment/results/broadwell/utdelay_p999_20260707_022638/raw.csv",
-    "icelake":     "experiment/results/icelake/utdelay_p999_20260707_090726/raw.csv",
-    "skylake_ann": "experiment/results/utdelay_p999_20260708_233528/raw.csv",
+    "broadwell":     "experiment/results/archive/20260910/broadwell/utdelay_p999_20260707_022638/raw.csv",
+    "icelake":       "experiment/results/archive/20260910/icelake/utdelay_p999_20260707_090726/raw.csv",
+    # emeraldrapids: utdelay_p999_* は N=0/4/30 の 3 点のみ、詳細な utdelay_sweep_* を使う
+    "emeraldrapids": "experiment/results/archive/20260910/emeraldrapids/utdelay_sweep_20260624_015236/raw.csv",
+    "skylake_ann":   "experiment/results/archive/20260910/misc/utdelay_p999_20260708_233528/raw.csv",
 }
 
 
@@ -91,7 +93,7 @@ def save(fig, name):
 # -------------------------------------------------------------------
 # Plot 1: QPS vs N × PAUSE_CYC（絶対値）
 # -------------------------------------------------------------------
-def plot_abs(datasets):
+def plot_abs(datasets, xlim=None, suffix=""):
     fig, ax = plt.subplots(figsize=(10, 5.5))
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -108,18 +110,27 @@ def plot_abs(datasets):
                 color=info["color"], linewidth=1.8, label=info["label"])
         ax.scatter(budgets, qps / 1e3, color=info["color"], s=18, zorder=5)
 
-        # masterベースライン
-        base = median(data["master"]) / 1e3
-        ax.axhline(base, color=info["color"], linestyle="--",
-                   linewidth=1.2, alpha=0.6)
+        # 各アーキの peak を計算してマーク
+        peak_i = int(np.argmax(qps))
+        peak_budget = budgets[peak_i]
+        peak_qps = qps[peak_i] / 1e3
+        ax.axvline(peak_budget, color=info["color"], linestyle=":", linewidth=1.2, alpha=0.7)
+        ax.annotate(f"N={ns[peak_i]}\n{peak_budget:.0f}cy",
+                    xy=(peak_budget, peak_qps), xytext=(5, -15),
+                    textcoords="offset points", fontsize=9, color=info["color"],
+                    fontweight="bold")
 
-    ax.set_xlabel("N × PAUSEサイクル数（スピン1ラウンドの総サイクル）", fontsize=13)
-    ax.set_ylabel("スループット [Kqps]", fontsize=13)
-    ax.set_title("QPS vs スピンコスト正規化（N × PAUSE_CYC）", fontsize=14)
-    ax.legend(fontsize=11, loc="lower left")
-    ax.grid(axis="y", linestyle=":", alpha=0.4)
+    ax.set_xlabel("N × PAUSE cycles (1 spin round total cycles)", fontsize=13)
+    ax.set_ylabel("Throughput [kQPS]", fontsize=13)
+    title = "QPS vs PAUSE budget (N × PAUSE cycles)"
+    if xlim:
+        ax.set_xlim(xlim)
+        title += f"  [zoom: {xlim[0]}-{xlim[1]} cy]"
+    ax.set_title(title, fontsize=13)
+    ax.legend(fontsize=10, loc="lower right")
+    ax.grid(True, linestyle=":", alpha=0.4)
     fig.tight_layout()
-    save(fig, "qps_normalized_pause_budget.pdf")
+    save(fig, f"qps_normalized_pause_budget{suffix}.pdf")
 
 
 # -------------------------------------------------------------------
@@ -170,6 +181,7 @@ if __name__ == "__main__":
         print("[ERROR] No data found.")
         raise SystemExit(1)
 
-    plot_abs(datasets)
+    plot_abs(datasets)                             # 全体像 (0 to max)
+    plot_abs(datasets, xlim=(0, 2500), suffix="_zoom")  # peak 周辺を拡大
     plot_relative(datasets)
     print(f"\nDone. PDFs saved to: {OUTPUT_DIR}")

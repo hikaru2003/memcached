@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>memcached の spinlock と cacheline の独立性</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+    max-width: 960px;
+    margin: 2em auto;
+    padding: 0 1.5em;
+    line-height: 1.7;
+    color: #222;
+  }
+  h1 { border-bottom: 3px solid #333; padding-bottom: 0.3em; }
+  h2 { border-left: 5px solid #4a7ac9; padding-left: 0.5em; margin-top: 2.5em; }
+  h3 { color: #333; margin-top: 1.8em; }
+  code, pre {
+    font-family: "SF Mono", Consolas, Menlo, monospace;
+    background: #f4f6f8;
+    border-radius: 3px;
+  }
+  code { padding: 2px 5px; font-size: 0.9em; }
+  pre {
+    padding: 1em;
+    overflow-x: auto;
+    border: 1px solid #d0d7de;
+    line-height: 1.5;
+  }
+  .figure {
+    margin: 1.5em 0;
+    text-align: center;
+    background: #fafbfc;
+    padding: 1em;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+  }
+  .caption {
+    font-size: 0.9em;
+    color: #57606a;
+    margin-top: 0.5em;
+  }
+  .legend {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.8em;
+    justify-content: center;
+    font-size: 0.9em;
+    margin: 0.5em 0;
+  }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .swatch {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 1px solid #666;
+    border-radius: 2px;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+  }
+  th, td {
+    border: 1px solid #d0d7de;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  th { background: #f4f6f8; }
+  .highlight-box {
+    background: #fffbdd;
+    border-left: 4px solid #d4a72c;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .warn-box {
+    background: #ffebe9;
+    border-left: 4px solid #cf222e;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .ok-box {
+    background: #dafbe1;
+    border-left: 4px solid #1a7f37;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+  }
+  .toc {
+    background: #f4f6f8;
+    padding: 1em 1.5em;
+    border-radius: 6px;
+    margin: 1.5em 0;
+  }
+  .toc ol { margin: 0; padding-left: 1.5em; }
+</style>
+</head>
+<body>
+
+<h1>memcached の spinlock と cacheline の独立性</h1>
+
+<p>
+  memcached の spinlock は <code>item_lock</code> という pthread mutex の配列で管理される。
+  スピン中の PAUSE 挿入回数 N と QPS の関係を分析するにあたり、
+  「ロックを取ったら item データも自動的にキャッシュに乗るのか？」という直感的な疑問が生じる。
+  本資料はこの疑問への回答として、
+  <strong>ロックの cacheline と item データの cacheline は完全に独立している</strong>
+  ことを図解で説明する。
+</p>
+
+<div class="toc">
+<strong>目次</strong>
+<ol>
+  <li>前提知識: MESI プロトコル</li>
+  <li>memcached が触る cacheline の内訳</li>
+  <li>trylock が M にするのはどの cacheline か</li>
+  <li>クリティカルセクション実行中の cacheline pingpong</li>
+  <li>スレッド数増加の影響</li>
+  <li>False sharing のケース</li>
+  <li>実験への示唆</li>
+</ol>
+</div>
+
+<h2>1. 前提知識: MESI プロトコル</h2>
+
+<p>
+  Intel CPU は各 L1/L2 キャッシュラインに MESI 状態を持たせて、
+  複数コア間のキャッシュ整合性を保つ。cacheline は 64 バイト単位で管理される。
+</p>
+
+<table>
+<tr><th>状態</th><th>意味</th><th>他コアが同じ line を持てるか</th></tr>
+<tr><td><strong>M</strong> (Modified)</td><td>このコアだけが持ち、DRAM と内容が違う (書き換え済み)</td><td>否 (invalidate 済み)</td></tr>
+<tr><td><strong>E</strong> (Exclusive)</td><td>このコアだけが持ち、DRAM と内容一致</td><td>否</td></tr>
+<tr><td><strong>S</strong> (Shared)</td><td>複数コアが同一内容を持てる</td><td>可</td></tr>
+<tr><td><strong>I</strong> (Invalid)</td><td>無効 (使えない、再取得が必要)</td><td>&mdash;</td></tr>
+</table>
+
+<div class="highlight-box">
+<strong>重要な性質</strong>: M 状態を持てるのは常に 1 コアだけ。
+書き込み (LOCK CMPXCHG, mov store 等) は M 権を要求し、
+他コアの同 line を invalidate する必要がある。これが cacheline 争奪の原因。
+</div>
+
+<h2>2. memcached が触る cacheline の内訳</h2>
+
+<p>
+  単一 key ワークロード (SET/GET を key = "1" だけで発行) を考える。
+  memcached が 1 リクエスト処理中に触る主なメモリ領域は 4 種類ある。
+  これらは物理的に別の場所にあり、それぞれ独立した cacheline を占める。
+</p>
+
+<div class="figure">
+<svg viewBox="0 0 800 260" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .cell-title { font-size: 13px; font-weight: bold; fill: #333; }
+      .cell-sub { font-size: 11px; fill: #555; }
+      .arrow-label { font-size: 11px; fill: #666; }
+    </style>
+  </defs>
+  <!-- Memory bar -->
+  <rect x="20" y="40" width="760" height="160" fill="none" stroke="#333" stroke-width="1.5"/>
+  <text x="400" y="30" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">物理メモリ空間 (概念図)</text>
+
+  <!-- Cacheline A: item_lock -->
+  <rect x="40" y="60" width="160" height="80" fill="#ffe0e0" stroke="#c00" stroke-width="1.5"/>
+  <text x="120" y="85" text-anchor="middle" class="cell-title">cacheline A</text>
+  <text x="120" y="102" text-anchor="middle" class="cell-sub">item_locks[hash]</text>
+  <text x="120" y="118" text-anchor="middle" class="cell-sub">(pthread_mutex_t)</text>
+  <text x="120" y="132" text-anchor="middle" class="cell-sub">~40 bytes</text>
+
+  <!-- Cacheline B: item struct + value -->
+  <rect x="220" y="60" width="160" height="80" fill="#e0f0ff" stroke="#06c" stroke-width="1.5"/>
+  <text x="300" y="85" text-anchor="middle" class="cell-title">cacheline B</text>
+  <text x="300" y="102" text-anchor="middle" class="cell-sub">item struct</text>
+  <text x="300" y="118" text-anchor="middle" class="cell-sub">+ value data</text>
+  <text x="300" y="132" text-anchor="middle" class="cell-sub">flags, cas, refcount</text>
+
+  <!-- Cacheline C: LRU -->
+  <rect x="400" y="60" width="160" height="80" fill="#e5ffe0" stroke="#080" stroke-width="1.5"/>
+  <text x="480" y="85" text-anchor="middle" class="cell-title">cacheline C</text>
+  <text x="480" y="102" text-anchor="middle" class="cell-sub">LRU list head/tail</text>
+  <text x="480" y="118" text-anchor="middle" class="cell-sub">(heads[], tails[])</text>
+  <text x="480" y="132" text-anchor="middle" class="cell-sub">SET/GET で更新</text>
+
+  <!-- Cacheline D: stats -->
+  <rect x="580" y="60" width="160" height="80" fill="#f0e0ff" stroke="#606" stroke-width="1.5"/>
+  <text x="660" y="85" text-anchor="middle" class="cell-title">cacheline D</text>
+  <text x="660" y="102" text-anchor="middle" class="cell-sub">slab stats</text>
+  <text x="660" y="118" text-anchor="middle" class="cell-sub">get_hits, set_cmds ...</text>
+  <text x="660" y="132" text-anchor="middle" class="cell-sub">64-bit counters</text>
+
+  <!-- Bottom: separate MESI states -->
+  <text x="400" y="175" text-anchor="middle" font-size="12" font-style="italic" fill="#666">
+    各 cacheline は独立した MESI 状態を持つ (M/E/S/I はそれぞれ別々に管理される)
+  </text>
+  <text x="400" y="195" text-anchor="middle" font-size="12" fill="#888">
+    A が M でも B/C/D はそれぞれ別のコアが持っている可能性がある
+  </text>
+</svg>
+<div class="caption">図 1: memcached が 1 リクエストで触る主な cacheline (概念図、物理レイアウトは実装依存)</div>
+</div>
+
+<h2>3. trylock が M にするのはどの cacheline か</h2>
+
+<p>
+  <code>pthread_mutex_trylock()</code> の内部実装は <code>LOCK CMPXCHG</code> (Compare-And-Swap の LOCK-prefix 版) を使う。
+  この命令が要求するのは <strong>ロック変数のアドレスを含む cacheline (= A) だけ</strong>。
+  item データや LRU の cacheline (B/C/D) は一切触らない。
+</p>
+
+<div class="figure">
+<svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c00"/>
+    </marker>
+    <style>
+      .cpu-box { font-size: 12px; font-weight: bold; fill: #333; }
+      .state { font-size: 14px; font-weight: bold; }
+    </style>
+  </defs>
+
+  <!-- Core X (locker) -->
+  <rect x="40" y="30" width="140" height="60" fill="#fff8e0" stroke="#333" stroke-width="1.5"/>
+  <text x="110" y="52" text-anchor="middle" class="cpu-box">Core X</text>
+  <text x="110" y="72" text-anchor="middle" font-size="11" fill="#333">trylock(A) 実行</text>
+
+  <!-- Cacheline A after trylock -->
+  <rect x="220" y="20" width="140" height="60" fill="#ffcccc" stroke="#c00" stroke-width="2"/>
+  <text x="290" y="42" text-anchor="middle" font-size="12" font-weight="bold">cacheline A</text>
+  <text x="290" y="60" text-anchor="middle" font-size="11">item_lock</text>
+  <text x="290" y="75" text-anchor="middle" class="state" fill="#c00">M on X</text>
+
+  <!-- Arrow from Core X to A -->
+  <line x1="180" y1="60" x2="215" y2="50" stroke="#c00" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="197" y="45" font-size="10" fill="#c00">LOCK CMPXCHG (RFO)</text>
+
+  <!-- Cacheline B (independent) -->
+  <rect x="450" y="20" width="140" height="60" fill="#e0f0ff" stroke="#06c" stroke-width="1.5"/>
+  <text x="520" y="42" text-anchor="middle" font-size="12" font-weight="bold">cacheline B</text>
+  <text x="520" y="60" text-anchor="middle" font-size="11">item data</text>
+  <text x="520" y="75" text-anchor="middle" font-size="12" font-weight="bold" fill="#06c">? (触ってない)</text>
+
+  <!-- Cacheline C -->
+  <rect x="620" y="20" width="140" height="60" fill="#e5ffe0" stroke="#080" stroke-width="1.5"/>
+  <text x="690" y="42" text-anchor="middle" font-size="12" font-weight="bold">cacheline C</text>
+  <text x="690" y="60" text-anchor="middle" font-size="11">LRU</text>
+  <text x="690" y="75" text-anchor="middle" font-size="12" font-weight="bold" fill="#080">? (触ってない)</text>
+
+  <!-- Other cores -->
+  <rect x="220" y="140" width="90" height="40" fill="#f5f5f5" stroke="#666"/>
+  <text x="265" y="164" text-anchor="middle" font-size="11" fill="#333">Core Y</text>
+  <rect x="330" y="140" width="90" height="40" fill="#f5f5f5" stroke="#666"/>
+  <text x="375" y="164" text-anchor="middle" font-size="11" fill="#333">Core Z</text>
+  <rect x="440" y="140" width="90" height="40" fill="#f5f5f5" stroke="#666"/>
+  <text x="485" y="164" text-anchor="middle" font-size="11" fill="#333">Core W</text>
+
+  <!-- Explanation -->
+  <text x="40" y="220" font-size="12" fill="#222" font-weight="bold">この時点で確定していること:</text>
+  <text x="40" y="242" font-size="12" fill="#333">・cacheline A: X が M で保持 (Y, Z, W は I に落とされる)</text>
+  <text x="40" y="262" font-size="12" fill="#333">・cacheline B, C, D: 状態変化なし (前の CS を実行したコアが M で持っているか、S/I のまま)</text>
+  <text x="40" y="286" font-size="12" fill="#c00" font-weight="bold">・item データ (cacheline B) は自動的には X の L1 に来ない</text>
+  <text x="40" y="306" font-size="12" fill="#333">→ 次のステップで X が item を触った時に初めて cacheline B の争奪が発生する</text>
+</svg>
+<div class="caption">図 2: trylock が M にするのは <code>item_lock</code> の cacheline A だけ</div>
+</div>
+
+<h2>4. クリティカルセクション実行中の cacheline pingpong</h2>
+
+<p>
+  ロックを取ったコア X が CS 内で実行する典型的な操作を追う。
+</p>
+
+<pre><code>// X が spinlock_lock(item_lock) 成功後 (cacheline A: M on X)
+item = do_item_get(key);         // ← ここで cacheline B を触る
+item-&gt;flags |= FLAG_UPDATED;      // ← cacheline B を書き換え
+do_item_update(item);            // ← ここで cacheline C (LRU) を更新
+stats.get_hits++;                // ← cacheline D を更新
+spinlock_unlock(item_lock);      // ← cacheline A を書き換え</code></pre>
+
+<div class="figure">
+<svg viewBox="0 0 820 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+    <style>
+      .step-num {
+        font-size: 14px; font-weight: bold; fill: #fff;
+      }
+    </style>
+  </defs>
+
+  <!-- Timeline column headers -->
+  <text x="70" y="20" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Core X (lock holder)</text>
+  <text x="270" y="20" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">cacheline A (lock)</text>
+  <text x="470" y="20" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">cacheline B (item)</text>
+  <text x="670" y="20" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">cacheline C (LRU)</text>
+
+  <!-- Step 1: trylock -->
+  <circle cx="20" cy="60" r="12" fill="#4a7ac9"/><text x="20" y="65" text-anchor="middle" class="step-num">1</text>
+  <text x="70" y="65" text-anchor="middle" font-size="11" fill="#333">trylock 成功</text>
+  <rect x="220" y="45" width="100" height="30" fill="#ffcccc" stroke="#c00" stroke-width="1.5"/>
+  <text x="270" y="65" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">M on X</text>
+  <rect x="420" y="45" width="100" height="30" fill="#f5f5f5" stroke="#888" stroke-dasharray="4,3"/>
+  <text x="470" y="65" text-anchor="middle" font-size="11" fill="#666">前は Y が M</text>
+  <rect x="620" y="45" width="100" height="30" fill="#f5f5f5" stroke="#888" stroke-dasharray="4,3"/>
+  <text x="670" y="65" text-anchor="middle" font-size="11" fill="#666">前は Z が M</text>
+
+  <!-- Step 2: read item -->
+  <circle cx="20" cy="115" r="12" fill="#4a7ac9"/><text x="20" y="120" class="step-num" text-anchor="middle">2</text>
+  <text x="70" y="120" text-anchor="middle" font-size="11" fill="#333">item を read</text>
+  <rect x="220" y="100" width="100" height="30" fill="#ffcccc" stroke="#c00" stroke-width="1.5"/>
+  <text x="270" y="120" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">M on X (継続)</text>
+  <rect x="420" y="100" width="100" height="30" fill="#ffe0e0" stroke="#c00" stroke-width="2"/>
+  <text x="470" y="120" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">Y→X で move (M on X)</text>
+  <rect x="620" y="100" width="100" height="30" fill="#f5f5f5" stroke="#888" stroke-dasharray="4,3"/>
+  <text x="670" y="120" text-anchor="middle" font-size="11" fill="#666">まだ触ってない</text>
+
+  <!-- Step 3: write item + update LRU -->
+  <circle cx="20" cy="170" r="12" fill="#4a7ac9"/><text x="20" y="175" class="step-num" text-anchor="middle">3</text>
+  <text x="70" y="175" text-anchor="middle" font-size="11" fill="#333">write + LRU 更新</text>
+  <rect x="220" y="155" width="100" height="30" fill="#ffcccc" stroke="#c00" stroke-width="1.5"/>
+  <text x="270" y="175" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">M on X</text>
+  <rect x="420" y="155" width="100" height="30" fill="#ffcccc" stroke="#c00" stroke-width="1.5"/>
+  <text x="470" y="175" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">M on X</text>
+  <rect x="620" y="155" width="100" height="30" fill="#ffe0e0" stroke="#c00" stroke-width="2"/>
+  <text x="670" y="175" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">Z→X で move (M on X)</text>
+
+  <!-- Step 4: other core (Y) tries trylock -->
+  <circle cx="20" cy="225" r="12" fill="#e37c00"/><text x="20" y="230" class="step-num" text-anchor="middle">4</text>
+  <text x="70" y="230" text-anchor="middle" font-size="11" fill="#e37c00">(Y が trylock)</text>
+  <rect x="220" y="210" width="100" height="30" fill="#ffcc99" stroke="#e37c00" stroke-width="2"/>
+  <text x="270" y="230" text-anchor="middle" font-size="11" font-weight="bold" fill="#e37c00">X→Y で move (M on Y)</text>
+  <rect x="420" y="210" width="100" height="30" fill="#ffcccc" stroke="#c00" stroke-width="1.5"/>
+  <text x="470" y="230" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">M on X (変化なし)</text>
+  <rect x="620" y="210" width="100" height="30" fill="#ffcccc" stroke="#c00" stroke-width="1.5"/>
+  <text x="670" y="230" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">M on X (変化なし)</text>
+
+  <!-- Step 5: X tries to unlock, needs A again -->
+  <circle cx="20" cy="280" r="12" fill="#c00"/><text x="20" y="285" class="step-num" text-anchor="middle">5</text>
+  <text x="70" y="285" text-anchor="middle" font-size="11" fill="#c00">unlock 呼び出し</text>
+  <rect x="220" y="265" width="100" height="30" fill="#ffe0e0" stroke="#c00" stroke-width="2"/>
+  <text x="270" y="285" text-anchor="middle" font-size="10" font-weight="bold" fill="#c00">Y→X で move (再取得)</text>
+  <text x="270" y="298" text-anchor="middle" font-size="10" fill="#c00">= unlock latency</text>
+  <rect x="420" y="265" width="100" height="30" fill="#ffcccc" stroke="#c00" stroke-width="1.5"/>
+  <text x="470" y="285" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">M on X</text>
+  <rect x="620" y="265" width="100" height="30" fill="#ffcccc" stroke="#c00" stroke-width="1.5"/>
+  <text x="670" y="285" text-anchor="middle" font-size="11" font-weight="bold" fill="#c00">M on X</text>
+
+  <!-- Summary at bottom -->
+  <text x="410" y="340" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">
+    要点: cacheline A の争奪 (lock 制御) と cacheline B/C の争奪 (データアクセス) は独立に発生する
+  </text>
+  <text x="410" y="365" text-anchor="middle" font-size="12" fill="#333">
+    CS 長 = ステップ 2, 3, 5 の合計 (item 読み書き + LRU 更新 + unlock 前まで)
+  </text>
+  <text x="410" y="385" text-anchor="middle" font-size="12" fill="#c00">
+    unlock latency = ステップ 5 の詳細 (Y から A を取り戻す時間)
+  </text>
+</svg>
+<div class="caption">図 3: CS 実行中に各 cacheline がどう推移するか (4 コアの単一 key 高競合ワークロード)</div>
+</div>
+
+<div class="highlight-box">
+<strong>ポイント</strong>: ロック cacheline (A) を保持している間に、item cacheline (B) や LRU cacheline (C) を触ると
+<strong>それぞれ別の RFO が発生する</strong>。ロック獲得コストとは別に、CS 内で毎回 cacheline move が起きる。
+</div>
+
+<h2>5. スレッド数増加の影響</h2>
+
+<p>
+  スレッド数が増えると <strong>cacheline を奪い合う相手のコア数</strong> が増える。
+  これは A (lock) だけでなく B (item), C (LRU), D (stats) にも影響する。
+</p>
+
+<table>
+<tr><th>スレッド数</th><th>cacheline A の争奪</th><th>cacheline B/C/D の争奪</th><th>CS 長への影響</th></tr>
+<tr><td>1</td><td>争奪なし (常に M on 自分)</td><td>争奪なし</td><td>最小 (L1 hit)</td></tr>
+<tr><td>2</td><td>2 コア間 pingpong</td><td>2 コア間 pingpong</td><td>小</td></tr>
+<tr><td>4</td><td>4 コアで奪い合い</td><td>4 コアで奪い合い、待ち行列発生</td><td>中</td></tr>
+<tr><td>8</td><td>8 コアで奪い合い、L3 帯域に近づく</td><td>8 コアで奪い合い、より深刻</td><td>大</td></tr>
+</table>
+
+<div class="ok-box">
+<strong>今回の実験</strong>: スレッド数 = 4 固定で PAUSE 回数 N を sweep する。
+そのため上記の「スレッド数依存」の効果は N の間で共通しており、N 感度としては現れない。
+唯一 N が影響するのは、<strong>trylock の頻度が下がることで cacheline B/C/D の pingpong 頻度もわずかに下がる</strong> 副次効果。
+</div>
+
+<h2>6. False sharing のケース (参考)</h2>
+
+<p>
+  もしロック変数と item データが <strong>同じ cacheline に載っていた</strong> ら、
+  trylock で M 権を取った瞬間に item cacheline も自動的に M になる (光の直感的な理解が正しくなる状況)。
+  これを false sharing と呼ぶ。
+</p>
+
+<div class="figure">
+<svg viewBox="0 0 800 220" xmlns="http://www.w3.org/2000/svg">
+  <!-- Normal case -->
+  <text x="200" y="20" text-anchor="middle" font-size="13" font-weight="bold" fill="#080">正常な設計 (memcached の実装)</text>
+  <rect x="60" y="35" width="130" height="50" fill="#ffe0e0" stroke="#c00" stroke-width="1.5"/>
+  <text x="125" y="55" text-anchor="middle" font-size="11" font-weight="bold">cacheline A</text>
+  <text x="125" y="72" text-anchor="middle" font-size="10">item_lock のみ</text>
+  <rect x="210" y="35" width="130" height="50" fill="#e0f0ff" stroke="#06c" stroke-width="1.5"/>
+  <text x="275" y="55" text-anchor="middle" font-size="11" font-weight="bold">cacheline B</text>
+  <text x="275" y="72" text-anchor="middle" font-size="10">item data のみ</text>
+  <text x="200" y="110" text-anchor="middle" font-size="11" fill="#333">→ trylock は A のみ M、B は独立</text>
+  <text x="200" y="130" text-anchor="middle" font-size="11" fill="#080">CS 内で B の再取得コストは発生するが、</text>
+  <text x="200" y="148" text-anchor="middle" font-size="11" fill="#080">A のロック競合との切り分けが可能</text>
+
+  <!-- False sharing case -->
+  <text x="600" y="20" text-anchor="middle" font-size="13" font-weight="bold" fill="#c00">False sharing (悪い設計例)</text>
+  <rect x="460" y="35" width="280" height="50" fill="#ffe0e0" stroke="#c00" stroke-width="2"/>
+  <text x="600" y="55" text-anchor="middle" font-size="11" font-weight="bold">cacheline A+B (混在)</text>
+  <text x="600" y="72" text-anchor="middle" font-size="10">item_lock と item data が同居</text>
+  <text x="600" y="110" text-anchor="middle" font-size="11" fill="#333">→ trylock で A+B が同時に M になる</text>
+  <text x="600" y="130" text-anchor="middle" font-size="11" fill="#c00">問題: 他コアが item を read するだけで</text>
+  <text x="600" y="148" text-anchor="middle" font-size="11" fill="#c00">lock 保持コア側の cacheline が S に落ちる</text>
+  <text x="600" y="168" text-anchor="middle" font-size="11" fill="#c00">= 不要な cacheline pingpong 増</text>
+</svg>
+<div class="caption">図 4: 正常な設計 vs false sharing の比較</div>
+</div>
+
+<p>
+  memcached は <code>item_locks[]</code> を独立配列にしており、item データとは別領域なので false sharing は起きない。
+  これは意図的な設計であり、ロック競合と item データ競合を独立に分析できる利点がある。
+</p>
+
+<h2>7. 実験への示唆</h2>
+
+<h3>hold time (CS 長) 実験</h3>
+
+<ul>
+  <li>CS 長 = cacheline B/C/D の move 時間を含む</li>
+  <li>L1 hit 前提の理論最小値 (数十 cy) より必ず大きくなる</li>
+  <li>予想: 数百 cy 〜 1k cy オーダー (skylake の HITM 転送コスト ~50-80cy を複数回)</li>
+  <li>N を変えても命令数は変わらないので median CS 長は N に対してほぼフラットになるはず</li>
+</ul>
+
+<h3>unlock latency 実験 (既に実施済み)</h3>
+
+<ul>
+  <li>unlock latency = cacheline A を再取得する時間 + atomic store + (futex_wake if any)</li>
+  <li>実測: N=0 で p99 = 1.7 μs (= 3570 cy)、N=200 で p99 = 0.2 μs (= 420 cy)</li>
+  <li>N が大きくなるほど他コアの trylock 頻度が減り、A の pingpong 頻度も減る → 単調減少</li>
+</ul>
+
+<h3>QPS 山形の解釈</h3>
+
+<ol>
+  <li><strong>左側 (N=0→4)</strong>: PAUSE 増 → A の pingpong 減 → unlock latency 減 → CS 全体が早く終わる → QPS 改善</li>
+  <li><strong>右側 (N=4→200)</strong>: A の pingpong はさらに減るが、<strong>trylock 間隔 (N × PAUSE cy) が CS 長を超え始める</strong> → 解放後の空振り時間が増えて QPS 悪化</li>
+</ol>
+
+<p>
+  この解釈の検証には CS 長を実測して、trylock 間隔と交差する N を予測 → 実測 QPS ピーク N と一致するか確認する必要がある。
+</p>
+
+<hr>
+<p style="color: #666; font-size: 0.9em; text-align: right;">
+  作成: 2026-09-09 / 実験環境: skylake ann (Intel Xeon Silver 4110, 2.10 GHz base, turbo off, SMT off, C-state off)
+</p>
+
+</body>
+</html>
