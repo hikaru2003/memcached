@@ -62,17 +62,24 @@ WL_CPUS="${WL_CPUS:-4-7}"
 # perf RFO イベント自動判別
 # - Skylake / Broadwell / Ice Lake: offcore_requests.demand_rfo
 # - Emerald Rapids: offcore_requests.demand_rfo が N/A なので l2_rqsts.rfo_miss にフォールバック
-# 判定は perf list の出力で行う (offcore_requests.demand_rfo がリストにあるかで分岐)
+#
+# 判定方針:
+#   perf list ベースは NG (Emerald では demand_rfo が list に載るが実際は動かない)。
+#   perf stat を実際に走らせて数値カウントが返るか (<not supported>/<not counted>/Bad event
+#   でないか) を確認する。
 detect_rfo_event() {
-    local perf_list_out
-    perf_list_out=$(perf list 2>/dev/null || true)
-    if echo "$perf_list_out" | grep -qE "offcore_requests\.demand_rfo"; then
-        echo "offcore_requests.demand_rfo"
-    elif echo "$perf_list_out" | grep -qE "l2_rqsts\.rfo_miss"; then
+    local out
+    out=$(perf stat -e offcore_requests.demand_rfo -x, /bin/true 2>&1)
+    # -x, 形式: 数値, ..., offcore_requests.demand_rfo, ... のカンマ区切り
+    # サポート外の場合: "<not supported>" や "<not counted>" が出る、または "Bad event name"
+    if echo "$out" | grep -qiE "not supported|not counted|Bad event|invalid|no such event|no matching event"; then
         echo "l2_rqsts.rfo_miss"
-    else
-        # perf list が使えない or 両方無い → demand_rfo で試す
+    elif echo "$out" | grep -qE "offcore_requests\.demand_rfo"; then
+        # 数値行に event 名が出れば OK
         echo "offcore_requests.demand_rfo"
+    else
+        # 判断つかない場合は Emerald 想定で l2_rqsts.rfo_miss にフォールバック (安全側)
+        echo "l2_rqsts.rfo_miss"
     fi
 }
 
