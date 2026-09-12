@@ -131,7 +131,10 @@ head -3 "$LATEST/raw.csv"
 ### Step 5-D. handoff smoke (~2 分)
 
 ```bash
-PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
+# handoff は memcached_handoff_debug バイナリを使う。
+# experiment_env.sh の MEMCACHED_BIN (utdelay 用) を都度上書き。
+MEMCACHED_BIN="$MEMCACHED_HANDOFF_BIN" \
+  PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
   bash experiment/run_handoff_sweep.sh 2>&1 | tail -20
 ```
 

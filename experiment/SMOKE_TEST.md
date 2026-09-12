@@ -91,7 +91,10 @@ head -5 "$LATEST/raw.csv"
 **バイナリ必要**: `./memcached_handoff_debug`
 
 ```bash
-PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
+# handoff は memcached_handoff_debug バイナリを使う必要がある。
+# experiment_env.sh が MEMCACHED_BIN=utdelay 用にしているので、都度上書き。
+MEMCACHED_BIN=${MEMCACHED_HANDOFF_BIN:-./memcached_handoff_debug} \
+  PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
   bash experiment/run_handoff_sweep.sh 2>&1 | tail -20
 ```
 
