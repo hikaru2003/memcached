@@ -1,0 +1,3 @@
+label,pause_per_round,spin_rounds,total_pause_budget,run,QPS,r_avg_us,r_p50_us,r_p99_us,r_p999_us,w_avg_us,w_p50_us,w_p99_us,w_p999_us
+master,master,30,0,1,960716.4,132.0,130.4,190.8,221.5,134.3,132.8,194.8,223.9
+N0,0,30,0,1,1128264.3,112.6,111.4,156.3,182.7,114.1,112.7,159.2,184.3
