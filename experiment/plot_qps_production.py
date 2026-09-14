@@ -38,6 +38,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+import numpy as np
+from scipy.interpolate import PchipInterpolator
+from scipy.ndimage import gaussian_filter1d
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +143,20 @@ def _load_all():
     return result
 
 
+def _smooth_curve(xs_data, ys_data, n_samples=500, sigma_frac=0.02):
+    """PCHIP で密な補間を作った後、Gaussian で平滑化して論文向けの滑らかな曲線を返す。
+
+    - PCHIP: piecewise cubic Hermite (monotonic-preserving)、peak を overshoot しない
+    - Gaussian: N=[0..200] の 500 点の内 sigma=n_samples*sigma_frac (default 10 点) で平滑化
+
+    sigma_frac を大きくすると更に滑らか、小さくすると原データに忠実。
+    """
+    xs = np.linspace(min(xs_data), max(xs_data), n_samples)
+    ys = PchipInterpolator(xs_data, ys_data)(xs)
+    ys = gaussian_filter1d(ys, sigma=n_samples * sigma_frac)
+    return xs, ys
+
+
 def plot_qps_abs(data, outpath):
     fig, ax = plt.subplots(figsize=(9.5, 5.5))
     ax.spines["top"].set_visible(False)
@@ -147,22 +164,28 @@ def plot_qps_abs(data, outpath):
 
     for arch, d in data.items():
         cfg = d["cfg"]
-        ns  = [e[0] for e in d["entries"]]
-        qps = [e[1] / 1e3 for e in d["entries"]]
-        sd  = [e[2] / 1e3 for e in d["entries"]]
-        ax.errorbar(ns, qps, yerr=sd, fmt="-o", ms=4, lw=1.6, color=cfg["color"],
-                    label=cfg["label"], capsize=2, alpha=0.9)
+        ns  = np.array([e[0] for e in d["entries"]], dtype=float)
+        qps = np.array([e[1] / 1e3 for e in d["entries"]], dtype=float)
+        sd  = np.array([e[2] / 1e3 for e in d["entries"]], dtype=float)
+
+        # 滑らかな補間曲線 (メイン)
+        xs, ys = _smooth_curve(ns, qps)
+        ax.plot(xs, ys, "-", lw=2.0, color=cfg["color"], label=cfg["label"], alpha=0.95)
+        # 実測点は小さいマーカーで場所だけ示す (±1σ エラーバー)
+        ax.errorbar(ns, qps, yerr=sd, fmt="o", ms=3, color=cfg["color"],
+                    capsize=2, alpha=0.6, zorder=3, elinewidth=0.7)
+
         # master baseline as horizontal line
         if d["master"]:
             m_qps = d["master"][0] / 1e3
             ax.axhline(m_qps, color=cfg["color"], ls=":", lw=1.0, alpha=0.7)
             ax.text(202, m_qps, f" master {m_qps:.0f}", color=cfg["color"],
                     fontsize=8, va="center")
-        # peak marker
-        peak_i = max(range(len(qps)), key=lambda i: qps[i])
-        ax.scatter([ns[peak_i]], [qps[peak_i]], color=cfg["color"], s=90,
-                   marker="*", zorder=5, edgecolor="black", linewidth=0.8)
-        ax.annotate(f"N={ns[peak_i]}",
+        # peak marker (実測ピーク位置)
+        peak_i = int(np.argmax(qps))
+        ax.scatter([ns[peak_i]], [qps[peak_i]], color=cfg["color"], s=110,
+                   marker="*", zorder=6, edgecolor="black", linewidth=0.8)
+        ax.annotate(f"N={int(ns[peak_i])}",
                     xy=(ns[peak_i], qps[peak_i]),
                     xytext=(6, 8), textcoords="offset points",
                     fontsize=9, color=cfg["color"], weight="bold")
@@ -190,13 +213,17 @@ def plot_qps_normalized(data, outpath):
         if not d["master"]:
             continue
         m = d["master"][0]
-        ns   = [e[0] for e in d["entries"]]
-        norm = [e[1] / m for e in d["entries"]]
-        ax.plot(ns, norm, "-o", ms=4, lw=1.6, color=cfg["color"], label=cfg["label"], alpha=0.9)
-        peak_i = max(range(len(norm)), key=lambda i: norm[i])
-        ax.scatter([ns[peak_i]], [norm[peak_i]], color=cfg["color"], s=90,
-                   marker="*", zorder=5, edgecolor="black", linewidth=0.8)
-        ax.annotate(f"N={ns[peak_i]}\n×{norm[peak_i]:.2f}",
+        ns   = np.array([e[0] for e in d["entries"]], dtype=float)
+        norm = np.array([e[1] / m for e in d["entries"]], dtype=float)
+
+        xs, ys = _smooth_curve(ns, norm)
+        ax.plot(xs, ys, "-", lw=2.0, color=cfg["color"], label=cfg["label"], alpha=0.95)
+        ax.scatter(ns, norm, s=14, color=cfg["color"], alpha=0.55, zorder=3)
+
+        peak_i = int(np.argmax(norm))
+        ax.scatter([ns[peak_i]], [norm[peak_i]], color=cfg["color"], s=110,
+                   marker="*", zorder=6, edgecolor="black", linewidth=0.8)
+        ax.annotate(f"N={int(ns[peak_i])}\n×{norm[peak_i]:.2f}",
                     xy=(ns[peak_i], norm[peak_i]),
                     xytext=(6, 8), textcoords="offset points",
                     fontsize=9, color=cfg["color"], weight="bold")
@@ -224,15 +251,18 @@ def plot_qps_pause_budget(data, outpath):
     for arch, d in data.items():
         cfg = d["cfg"]
         pause_cy = cfg["pause_cy"]
-        ns      = [e[0] for e in d["entries"]]
-        qps     = [e[1] / 1e3 for e in d["entries"]]
-        budgets = [n * pause_cy for n in ns]
-        ax.plot(budgets, qps, "-o", ms=4, lw=1.6, color=cfg["color"],
-                label=cfg["label"], alpha=0.9)
-        peak_i = max(range(len(qps)), key=lambda i: qps[i])
-        ax.scatter([budgets[peak_i]], [qps[peak_i]], color=cfg["color"], s=90,
-                   marker="*", zorder=5, edgecolor="black", linewidth=0.8)
-        ax.annotate(f"N={ns[peak_i]}\n{budgets[peak_i]:.0f}cy",
+        ns      = np.array([e[0] for e in d["entries"]], dtype=float)
+        qps     = np.array([e[1] / 1e3 for e in d["entries"]], dtype=float)
+        budgets = ns * pause_cy
+
+        xs, ys = _smooth_curve(budgets, qps)
+        ax.plot(xs, ys, "-", lw=2.0, color=cfg["color"], label=cfg["label"], alpha=0.95)
+        ax.scatter(budgets, qps, s=14, color=cfg["color"], alpha=0.55, zorder=3)
+
+        peak_i = int(np.argmax(qps))
+        ax.scatter([budgets[peak_i]], [qps[peak_i]], color=cfg["color"], s=110,
+                   marker="*", zorder=6, edgecolor="black", linewidth=0.8)
+        ax.annotate(f"N={int(ns[peak_i])}\n{budgets[peak_i]:.0f}cy",
                     xy=(budgets[peak_i], qps[peak_i]),
                     xytext=(8, 8), textcoords="offset points",
                     fontsize=9, color=cfg["color"], weight="bold")
