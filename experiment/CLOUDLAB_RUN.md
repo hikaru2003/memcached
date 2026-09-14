@@ -90,25 +90,10 @@ echo "=== TSC ==="; awk '/cpu MHz/{print $NF; exit}' /proc/cpuinfo
 
 ### Step 5-B. PAUSE cycle 実測
 
+C ソースは repo 内に配置済み (`experiment/pause_cycle_count.c`)。それをビルドして実行:
+
 ```bash
-if [ ! -f ~/simple_mysql/pause_cycle_count.c ]; then
-  mkdir -p ~/simple_mysql
-  cat > ~/simple_mysql/pause_cycle_count.c << 'EOF'
-#include <stdio.h>
-#include <stdint.h>
-#include <x86intrin.h>
-#define N 100000000ULL
-int main(void) {
-    unsigned dummy;
-    uint64_t s = __rdtscp(&dummy);
-    for (uint64_t i = 0; i < N; i++) __builtin_ia32_pause();
-    uint64_t e = __rdtscp(&dummy);
-    printf("PAUSE cycles = %.2f\n", (double)(e - s) / (double)N);
-    return 0;
-}
-EOF
-fi
-gcc -O2 ~/simple_mysql/pause_cycle_count.c -o /tmp/pause_cycle_count
+gcc -O2 experiment/pause_cycle_count.c -o /tmp/pause_cycle_count
 taskset -c 0 /tmp/pause_cycle_count
 ```
 

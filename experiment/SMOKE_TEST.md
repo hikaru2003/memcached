@@ -39,7 +39,7 @@ echo "=== TSC (base clk) ==="; awk '/cpu MHz/{print $NF; exit}' /proc/cpuinfo
 ## Step B. PAUSE cycle 実測 (30 秒)
 
 ```bash
-gcc -O2 ~/simple_mysql/pause_cycle_count.c -o /tmp/pause_cycle_count 2>&1
+gcc -O2 experiment/pause_cycle_count.c -o /tmp/pause_cycle_count
 taskset -c 0 /tmp/pause_cycle_count
 ```
 
