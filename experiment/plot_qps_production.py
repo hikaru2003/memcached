@@ -66,12 +66,18 @@ DATA = {
         "color":     "tab:red",
         "pause_cy":  37.0,
     },
+    "skylake": {
+        "csv":       "experiment/results/skylake/utdelay_p999_20260913_203737/raw.csv",
+        "label":     "Skylake (c220g5, PAUSE~142cy)",
+        "color":     "tab:green",
+        "pause_cy":  142.0,
+    },
 }
 
 OUTDIR = "experiment/results/plots/v4"
 
 FIG_META = ("Production run (env pinned, warmup 120s + 60s × 30 runs/N, 40 N grid)\n"
-            "commit 87cd2ba9 / date 2026-09-13,14")
+            "commit 87cd2ba9 / dates 2026-09-13 (Broadwell/Skylake) & 2026-09-14 (Sunny Cove/Emerald)")
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +198,7 @@ def plot_qps_abs(data, outpath):
 
     ax.set_xlabel("PAUSE per round (N)", fontsize=12)
     ax.set_ylabel("QPS [kQPS]", fontsize=12)
-    ax.set_title("QPS vs N — 3 archs (production)", fontsize=13)
+    ax.set_title("QPS vs N — 4 archs (production)", fontsize=13)
     ax.grid(axis="y", linestyle=":", alpha=0.4)
     ax.legend(loc="lower center", fontsize=10, ncol=1)
     ax.text(0.02, 0.02, FIG_META, transform=ax.transAxes,
@@ -231,7 +237,7 @@ def plot_qps_normalized(data, outpath):
     ax.axhline(1.0, color="black", ls="--", lw=0.8, alpha=0.5, label="master baseline (=1.0)")
     ax.set_xlabel("PAUSE per round (N)", fontsize=12)
     ax.set_ylabel("QPS / master QPS", fontsize=12)
-    ax.set_title("Normalized QPS (vs pthread_mutex baseline) — 3 archs (production)", fontsize=13)
+    ax.set_title("Normalized QPS (vs pthread_mutex baseline) — 4 archs (production)", fontsize=13)
     ax.grid(axis="y", linestyle=":", alpha=0.4)
     ax.legend(loc="lower center", fontsize=10)
     ax.text(0.02, 0.02, FIG_META, transform=ax.transAxes,
@@ -269,7 +275,7 @@ def plot_qps_pause_budget(data, outpath):
 
     ax.set_xlabel("PAUSE budget per spin round [cycles]  (= N × PAUSE cy)", fontsize=12)
     ax.set_ylabel("QPS [kQPS]", fontsize=12)
-    ax.set_title("QPS vs PAUSE budget (x-axis normalized) — 3 archs (production)", fontsize=13)
+    ax.set_title("QPS vs PAUSE budget (x-axis normalized) — 4 archs (production)", fontsize=13)
     ax.set_xlim(0, 2500)
     ax.grid(axis="y", linestyle=":", alpha=0.4)
     ax.legend(loc="lower right", fontsize=10)
