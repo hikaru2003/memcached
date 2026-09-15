@@ -34,7 +34,7 @@
 | futex (ann) | 60s | 60s | 10 | 660s | 7.3h |
 
 **サーバ別合計**:
-- cloudlab 各サーバ (Ivy / Broadwell / Skylake / Sunny Cove / Emerald): utdelay + handoff + cache_miss = **~36 時間 / サーバ**
+- cloudlab 各サーバ (Broadwell / Skylake / Sunny Cove / Emerald): utdelay + handoff + cache_miss = **~36 時間 / サーバ**
 - ann (Skylake): Phase 1 (36h) + Phase 2 (unlock + hold_mixed + hold_get100 + futex = 4×7h = 28h) = **~64 時間**
 - **全サーバ合計**: cloudlab 5 × 36h + ann 64h = **244 時間 (約 10 日分の実行時間)**
 
@@ -46,19 +46,17 @@ cloudlab の予約は 24h 単位で複数回に分割する必要がある。
 
 | サーバ | ノード | アーキ | ベースクロック | 実施実験 |
 |---|---|---|---|---|
-| c8220 系 (cloudlab) | Xeon E5-2650v2 相当 | Ivy Bridge | 2.6 GHz | Phase 1 (utdelay + handoff + cache_miss) |
-| xl170 (cloudlab) | E5-2640 v4 | Broadwell | 2.4 GHz | Phase 1 |
-| c220g5 (cloudlab) | Silver 4114 | Skylake | 2.2 GHz | Phase 1 |
-| sm110 (cloudlab) | Silver 4314 | Sunny Cove (Ice Lake) | 2.4 GHz | Phase 1 |
-| c6620 (cloudlab) | Gold 5512U | Emerald Rapids | 2.1 GHz | Phase 1 |
-| **ann (研究室)** | Silver 4110 | Skylake | 2.1 GHz | Phase 1 + **Phase 2 (unlock + hold + futex)** |
+| xl170 (cloudlab) | E5-2640 v4 | Broadwell | 2.4 GHz | Phase 1 + Phase 2 |
+| c220g5 (cloudlab) | Silver 4114 | Skylake | 2.2 GHz | Phase 1 + Phase 2 |
+| sm110 (cloudlab) | Silver 4314 | Sunny Cove (Ice Lake) | 2.4 GHz | Phase 1 + Phase 2 |
+| c6620 (cloudlab) | Gold 5512U | Emerald Rapids | 2.1 GHz | Phase 1 + Phase 2 |
+| **ann (研究室)** | Silver 4110 | Skylake | 2.1 GHz | 参考データ用 (Silver 4114 との差分検証) |
 
 **Skylake 系の位置付け**:
-- **cloudlab c220g5 (Silver 4114)**: 他アーキとの比較用 (同一 cloudlab 環境で条件揃え)。**Phase 1 は cloudlab を主データとする**
-- **ann (Silver 4110)**: Phase 2 (unlock/hold/futex) の debug binary が既に設定済。**Phase 2 のメカニズム解析はこちらで**
-- 両者は Skylake マイクロアーキ的にはほぼ同じ (Silver 4110 vs 4114) だが、環境設定・周波数が異なるので Phase 1 の QPS 比較には cloudlab 側を採用。ann は Phase 2 の内部指標のみ。
+- **cloudlab c220g5 (Silver 4114)**: Phase 1 + Phase 2 の主データ。同一 cloudlab 環境で他アーキと比較。
+- **ann (Silver 4110)**: 参考データ (Silver 4110 vs 4114 の差分検証、必要時のみ)。
 
-**Ivy Bridge を追加する目的**: 世代軸 (Ivy → Broadwell → Skylake → Sunny Cove → Emerald) を揃えることで、PAUSE cycle 数の世代変化と QPS 山形の対応をより明確に示す。
+**Ivy Bridge (c8220) は今回対象外**: Broadwell (PAUSE ~10cy) と PAUSE 特性がほぼ同じで、追加的な知見が得られない見込みのため除外。
 
 ---
 
@@ -71,8 +69,7 @@ gcc -O2 ~/simple_mysql/pause_cycle_count.c -o /tmp/pause_cycle_count
 taskset -c 0 /tmp/pause_cycle_count
 ```
 
-期待値: Ivy Bridge ~10cy / Broadwell ~10cy / Skylake ~124cy / Sunny Cove ~39cy / Emerald ~37cy
-(Ivy Bridge は Broadwell と同じ短 PAUSE 世代、Skylake で微アーキが変わって長 PAUSE 化)
+期待値: Broadwell ~10cy / Skylake ~142cy (Silver 4114) or ~124cy (Silver 4110) / Sunny Cove ~39cy / Emerald ~37cy
 
 ### Step 1. 環境設定
 
@@ -108,19 +105,7 @@ futex は utdelay バイナリで測定可能 (perf trace で拾う)。
 
 ---
 
-## Phase 1: 全 6 アーキ共通
-
-### 実験 1-0: cloudlab Ivy Bridge (c8220 系)
-
-- [ ] **Step 0**: PAUSE cycle 実測 (~10cy 期待)
-- [ ] **Step 1**: `sudo bash experiment/setup_perf_env.sh`
-- [ ] **Step 2**: memcached_utdelay, memcached_handoff_debug ビルド
-- [ ] **1-0-a**: utdelay_sweep (21h)
-- [ ] **結果確認**
-- [ ] **1-0-b**: handoff_sweep (7h)
-- [ ] **結果確認**
-- [ ] **1-0-c**: cache_miss_sweep (7h)
-- [ ] **結果確認**
+## Phase 1: 全 4 アーキ共通
 
 ### 実験 1-1: xl170 (Broadwell)
 
@@ -209,7 +194,6 @@ setup_cloudlab.sh がすでに memcached_unlock_debug と memcached_hold_debug �
 - [ ] **push**: `EXPERIMENT_TYPE=futex bash experiment/push_results.sh`
 
 **サーバ別チェック** (全 5 アーキで実施):
-- [ ] Ivy Bridge (c8220) — Phase 2 完了
 - [ ] Broadwell (xl170) — Phase 2 完了
 - [ ] Skylake (c220g5) — Phase 2 完了
 - [ ] Sunny Cove (sm110p) — Phase 2 完了
@@ -266,7 +250,7 @@ Phase 1/2 で確定した「アーキごとに peak N が異なる」を、ワ�
   ```
 - [ ] 各アーキの結果構造を確認
   ```bash
-  for a in ivybridge broadwell skylake icelake emeraldrapids skylake_ann; do echo "== $a =="; ls experiment/results/$a/; done
+  for a in broadwell skylake icelake emeraldrapids skylake_ann; do echo "== $a =="; ls experiment/results/$a/; done
   ```
 - [ ] 5 アーキで揃うグラフ再生成
   ```bash
@@ -282,10 +266,10 @@ Phase 1/2 で確定した「アーキごとに peak N が異なる」を、ワ�
 
 ## 実行順序の推奨
 
-1. **cloudlab 5 サーバ順次 Phase 1** (1 サーバ 36h、各 2 泊 3 日相当)
-   - 順: c8220 (Ivy) → xl170 (Broadwell) → c220g5 (Skylake) → sm110p (Sunny Cove) → c6620 (Emerald)
+1. **cloudlab 4 サーバ順次 Phase 1** (1 サーバ 36h、各 2 泊 3 日相当)
+   - 順: xl170 (Broadwell) → c220g5 (Skylake) → sm110p (Sunny Cove) → c6620 (Emerald)
    - サーバ返却前に必ず 3 種 push
-2. **cloudlab 5 サーバ Phase 2** (setup_cloudlab.sh 更新後、~35h/サーバ)
+2. **cloudlab 4 サーバ Phase 2** (setup_cloudlab.sh 更新後、~35h/サーバ)
    - 全アーキで unlock + hold × 3 + futex を回す
    - Phase 1 と同じサーバで連続実施できる場合はそのまま
 3. **Phase 3 sensitivity** (Broadwell + Skylake + Emerald)

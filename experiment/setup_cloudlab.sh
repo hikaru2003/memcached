@@ -13,7 +13,7 @@
 #       debug/wait-time               -> memcached_wait_debug      (wait 分布計測用、旧実験)
 #       debug/handoff-latency         -> memcached_handoff_debug   (handoff latency 計測用)
 #       debug/unlock-latency          -> memcached_unlock_debug    (Phase 2: unlock latency)
-#       debug/hold-time-v2            -> memcached_hold_debug      (Phase 2: CS 長)
+#       debug/hold-split              -> memcached_hold_debug      (Phase 2: item_lock / slabs_lock 分離 CS 長)
 #   - leverich/mutilate (standard + p999 patched) のビルド
 #   - アーキテクチャ判定・env プリセット生成 (~/experiment_env.sh)
 #   - myfork remote (git@github.com:hikaru2003/memcached.git) 設定
@@ -190,15 +190,15 @@ if [ -z "$SKIP_BUILD" ]; then
     echo "  Built: $MC_DIR/memcached_unlock_debug"
     cd - >/dev/null
 
-    # debug/hold-time-v2 バイナリのビルド（CS 長 (hold time) 実験用、Phase 2）
-    echo "  Building memcached_hold_debug (debug/hold-time-v2 branch) ..."
+    # debug/hold-split バイナリのビルド（item_lock と slabs_lock を分離計測、Phase 2）
+    echo "  Building memcached_hold_debug (debug/hold-split branch) ..."
     HOLD_BUILD_DIR="${BASE_DIR}/memcached_hold_src"
     if [ -d "$HOLD_BUILD_DIR/.git" ]; then
-        git -C "$HOLD_BUILD_DIR" fetch origin debug/hold-time-v2 2>&1 | tail -2 || true
-        git -C "$HOLD_BUILD_DIR" checkout debug/hold-time-v2 2>&1 | tail -1 || true
-        git -C "$HOLD_BUILD_DIR" pull origin debug/hold-time-v2 2>&1 | tail -2 || true
+        git -C "$HOLD_BUILD_DIR" fetch origin debug/hold-split 2>&1 | tail -2 || true
+        git -C "$HOLD_BUILD_DIR" checkout debug/hold-split 2>&1 | tail -1 || true
+        git -C "$HOLD_BUILD_DIR" pull origin debug/hold-split 2>&1 | tail -2 || true
     else
-        git clone --branch debug/hold-time-v2 "$MC_REPO" "$HOLD_BUILD_DIR"
+        git clone --branch debug/hold-split "$MC_REPO" "$HOLD_BUILD_DIR"
     fi
     cd "$HOLD_BUILD_DIR"
     ./autogen.sh 2>&1 | tail -3

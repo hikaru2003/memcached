@@ -4,16 +4,22 @@ Usage:
     python3 experiment/extract_hold_stats.py --dir experiment/results/hold_YYYYMMDD_HHMMSS
 
 Description:
-    hold time sweep の各 N ディレクトリから hold_samples_thread*.bin を読み込み、
+    hold time sweep の各 N ディレクトリから hold*_samples_thread*.bin を読み込み、
     統計 (min/mean/p50/p90/p95/p99/p999/max) を計算して CSV に出力する。
     サイクル単位で出力する (PAUSE cy と直接比較するため、us 換算しない)。
     参考として us 列も付随する。
 
+    debug/hold-split バイナリで生成される場合、2 種類のファイルを別々に処理する:
+      hold_samples_thread<N>.bin      → hold_slabs_summary.csv (slabs_lock 系)
+      hold_item_samples_thread<N>.bin → hold_item_summary.csv  (item_locks[] 系)
+
+    旧 debug/hold-time-v2 バイナリで生成された場合は hold_samples_thread<N>.bin のみ
+    存在するので、hold_summary.csv (混合) を従来通り出力する。
+
 Output:
-    <dir>/hold_summary.csv
-      label, ppr, mean_qps, n_samples,
-      min_cy, mean_cy, p50_cy, p90_cy, p95_cy, p99_cy, p999_cy, max_cy,
-      p50_us, p99_us  (参考、TSC MHz 前提)
+    <dir>/hold_summary.csv       (旧混合バイナリの場合、または slabs 系のみ)
+    <dir>/hold_slabs_summary.csv (split バイナリの slabs_lock 系)
+    <dir>/hold_item_summary.csv  (split バイナリの item_locks[] 系)
 """
 import argparse
 import csv
@@ -24,8 +30,9 @@ import sys
 import numpy as np
 
 
-def load_samples(dir_n):
-    files = sorted(glob.glob(os.path.join(dir_n, "hold_samples_thread*.bin")))
+def load_samples(dir_n, prefix):
+    """prefix='hold_samples' or 'hold_item_samples'"""
+    files = sorted(glob.glob(os.path.join(dir_n, f"{prefix}_thread*.bin")))
     arrs = [np.fromfile(f, dtype=np.uint64) for f in files]
     if not arrs:
         return np.array([], dtype=np.uint64)
@@ -61,6 +68,41 @@ def compute_stats(samples):
     }
 
 
+def _write_summary(csv_path, n_dirs, result_dir, prefix, tsc_mhz):
+    """Return number of rows written."""
+    cy_to_us = 1.0 / tsc_mhz
+    rows = 0
+    with open(csv_path, "w", newline="") as fout:
+        w = csv.writer(fout)
+        w.writerow([
+            "label", "ppr", "mc_threads", "mean_qps", "n_samples",
+            "min_cy", "mean_cy", "p50_cy", "p90_cy", "p95_cy", "p99_cy", "p999_cy", "max_cy",
+            "p50_us", "p99_us",
+        ])
+        for T, ppr, name in n_dirs:
+            dir_n = os.path.join(result_dir, name)
+            samples = load_samples(dir_n, prefix)
+            if samples.size == 0:
+                continue
+            stats = compute_stats(samples)
+            qps = load_qps(dir_n)
+            t_str = str(T) if T > 0 else ""
+            w.writerow([
+                name, ppr, t_str, qps if qps is not None else "",
+                stats["n"],
+                stats["min"], f"{stats['mean']:.1f}",
+                f"{stats['p50']:.1f}", f"{stats['p90']:.1f}", f"{stats['p95']:.1f}",
+                f"{stats['p99']:.1f}", f"{stats['p999']:.1f}", stats["max"],
+                f"{stats['p50']*cy_to_us:.4f}", f"{stats['p99']*cy_to_us:.4f}",
+            ])
+            rows += 1
+            t_label = f"T{T}" if T > 0 else "  "
+            print(f"[OK] {name:10s} N={ppr:4d} {t_label:3s}  QPS={qps or 'N/A':>7}  n={stats['n']:>8}  "
+                  f"p50={stats['p50']:6.0f}cy  mean={stats['mean']:6.0f}cy  "
+                  f"p99={stats['p99']:7.0f}cy  p999={stats['p999']:8.0f}cy")
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", required=True)
@@ -78,7 +120,7 @@ def main():
     for d in os.listdir(result_dir):
         m2 = re.match(r"^N(\d+)_T(\d+)$", d)
         if m2:
-            n_dirs.append((int(m2.group(2)), int(m2.group(1)), d))  # sort by T then N
+            n_dirs.append((int(m2.group(2)), int(m2.group(1)), d))
             continue
         m1 = re.match(r"^N(\d+)$", d)
         if m1:
@@ -88,39 +130,30 @@ def main():
     if not n_dirs:
         sys.exit(f"[ERROR] no N<x> or N<x>_T<y> subdirectories found in {result_dir}")
 
-    csv_path = os.path.join(result_dir, "hold_summary.csv")
-    cy_to_us = 1.0 / args.tsc_mhz
+    # Detect whether the split (item + slabs) or the merged binary was used
+    has_item = False
+    for _, _, name in n_dirs:
+        if glob.glob(os.path.join(result_dir, name, "hold_item_samples_thread*.bin")):
+            has_item = True
+            break
 
-    with open(csv_path, "w", newline="") as fout:
-        w = csv.writer(fout)
-        w.writerow([
-            "label", "ppr", "mc_threads", "mean_qps", "n_samples",
-            "min_cy", "mean_cy", "p50_cy", "p90_cy", "p95_cy", "p99_cy", "p999_cy", "max_cy",
-            "p50_us", "p99_us",
-        ])
-        for T, ppr, name in n_dirs:
-            dir_n = os.path.join(result_dir, name)
-            samples = load_samples(dir_n)
-            stats = compute_stats(samples)
-            qps = load_qps(dir_n)
-            if stats is None:
-                print(f"[WARN] {name}: no samples")
-                continue
-            t_str = str(T) if T > 0 else ""
-            w.writerow([
-                name, ppr, t_str, qps if qps is not None else "",
-                stats["n"],
-                stats["min"], f"{stats['mean']:.1f}",
-                f"{stats['p50']:.1f}", f"{stats['p90']:.1f}", f"{stats['p95']:.1f}",
-                f"{stats['p99']:.1f}", f"{stats['p999']:.1f}", stats["max"],
-                f"{stats['p50']*cy_to_us:.4f}", f"{stats['p99']*cy_to_us:.4f}",
-            ])
-            t_label = f"T{T}" if T > 0 else "  "
-            print(f"[OK] {name:10s} N={ppr:4d} {t_label:3s}  QPS={qps or 'N/A':>7}  n={stats['n']:>8}  "
-                  f"p50={stats['p50']:6.0f}cy  mean={stats['mean']:6.0f}cy  "
-                  f"p99={stats['p99']:7.0f}cy  p999={stats['p999']:8.0f}cy")
-
-    print(f"\n[write] {csv_path}")
+    if has_item:
+        # debug/hold-split: emit two summary CSVs
+        print(f"[INFO] detected debug/hold-split output (item + slabs 分離)")
+        slabs_path = os.path.join(result_dir, "hold_slabs_summary.csv")
+        item_path  = os.path.join(result_dir, "hold_item_summary.csv")
+        print(f"\n--- slabs_lock summary ({slabs_path}) ---")
+        n_slabs = _write_summary(slabs_path, n_dirs, result_dir, "hold_samples", args.tsc_mhz)
+        print(f"\n--- item_locks[] summary ({item_path}) ---")
+        n_item  = _write_summary(item_path,  n_dirs, result_dir, "hold_item_samples", args.tsc_mhz)
+        print(f"\n[write] {slabs_path} ({n_slabs} rows)")
+        print(f"[write] {item_path} ({n_item} rows)")
+    else:
+        # 旧 debug/hold-time-v2 (item + slabs 混合)
+        print(f"[INFO] detected old merged hold binary output")
+        csv_path = os.path.join(result_dir, "hold_summary.csv")
+        n = _write_summary(csv_path, n_dirs, result_dir, "hold_samples", args.tsc_mhz)
+        print(f"\n[write] {csv_path} ({n} rows)")
 
 
 if __name__ == "__main__":

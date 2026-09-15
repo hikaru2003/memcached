@@ -18,9 +18,9 @@
    - 未登録の場合: **Create Profile** で `experiment/cloudlab_profile_v2.py` を貼り付けて保存
 4. **Parameters** で以下を選択:
    - **最初は**: `Broadwell (xl170)` @ Utah
-   - **次からは**: Ivy Bridge (c8220) / Skylake (c220g5) / Sunny Cove (sm110p) / Emerald (c6620)
+   - **次からは**: Skylake (c220g5) / Sunny Cove (sm110p) / Emerald (c6620)
 5. **Next → Finalize → Start**
-6. Cluster: 選んだアーキ対応のクラスタ (xl170/c6620=Utah, c8220=Clemson, c220g5/sm110p=Wisconsin)
+6. Cluster: 選んだアーキ対応のクラスタ (xl170/c6620=Utah, c220g5/sm110p=Wisconsin)
 7. ステータスが **Ready** になるまで待つ (2-3 分)
 
 ---
@@ -97,7 +97,7 @@ gcc -O2 experiment/pause_cycle_count.c -o /tmp/pause_cycle_count
 taskset -c 0 /tmp/pause_cycle_count
 ```
 
-**期待**: Ivy ~10 / Broadwell ~10 / Skylake ~124 / Sunny Cove ~39 / Emerald ~37
+**期待**: Broadwell ~10 / Skylake ~142 (c220g5) or ~124 (ann) / Sunny Cove ~39 / Emerald ~37
 
 ### Step 5-C. utdelay smoke (~2 分)
 
@@ -217,7 +217,6 @@ cat "$LATEST/summary.md"
   - Skylake: N ≈ 5
   - Sunny Cove: N ≈ 15
   - Emerald: N ≈ 30
-  - Ivy Bridge: N ≈ 40-50
 
 ### push
 
@@ -299,6 +298,28 @@ EXPERIMENT_TYPE=cache_miss bash experiment/push_results.sh
 
 Phase 1 (utdelay + handoff + cache_miss) が完了したら Phase 2。**5 種類の実験**を順次実行する。
 
+### Step 9-0. 既存サーバでの追加ビルド (今借りている 4 サーバに適用)
+
+初回セットアップ時 (Sep 12-14) には `memcached_unlock_debug` と `memcached_hold_debug` が
+ビルドされていない。 以下で追加ビルド:
+
+```bash
+cd /users/Morisaki/memcached
+git pull origin results 2>&1 | tail -3
+
+# setup_cloudlab.sh を SKIP_PKG=1 で再実行 → 追加バイナリのみビルド (~5 分)
+sudo SKIP_PKG=1 bash experiment/setup_cloudlab.sh 2>&1 | tail -20
+
+# 確認
+ls -la /users/Morisaki/memcached/memcached_unlock_debug /users/Morisaki/memcached/memcached_hold_debug
+```
+
+**期待**: 2 バイナリが実行可能で 1MB 超のサイズで存在。
+
+hold は **item_lock と slabs_lock を分離計測する `debug/hold-split` ブランチ**を採用。
+以前の `debug/hold-time-v2` では両者混合で測っていたが、GET のみでも slabs_lock を数回通る
+問題があったため item 用の rdtsc 経路を追加した (spin+PAUSE のロジックは v2 と完全同一)。
+
 ### Step 9-a. 事前セットアップ (30 秒)
 
 ```bash
@@ -339,6 +360,12 @@ EXPERIMENT_TYPE=unlock bash experiment/push_results.sh
 
 ### Step 9-c. hold_sweep × 3 パターン (~21h、UPDATE_RATIO 3 種)
 
+**新実装 (`debug/hold-split`) では 1 回の run で item_lock と slabs_lock を分離計測**する。
+UPDATE_RATIO を変えるのはワークロード変化による CS 長の差を見るため:
+- GET 100%: item_lock のみが hot 競合、slabs_lock は stats 参照など少数
+- SET 100%: 両方 hot 競合、slabs_lock alloc/free が増える
+- Mixed (0.5): 実運用相当
+
 **Mixed (SET/GET 50/50、default)**:
 ```bash
 tmux new -s hold_mixed
@@ -348,7 +375,7 @@ export MEMCACHED_BIN="$MEMCACHED_HOLD_BIN"
 bash experiment/run_hold_sweep.sh 2>&1 | tee /tmp/hold_mixed.log
 ```
 
-**GET 100%** (item_lock 単独競合の CS 長):
+**GET 100%**:
 ```bash
 tmux new -s hold_get100
 source ~/experiment_env.sh
@@ -357,7 +384,7 @@ export MEMCACHED_BIN="$MEMCACHED_HOLD_BIN"
 UPDATE_RATIO=0.0 bash experiment/run_hold_sweep.sh 2>&1 | tee /tmp/hold_get100.log
 ```
 
-**SET 100%** (item_lock + slabs_lock 両方の CS 長):
+**SET 100%**:
 ```bash
 tmux new -s hold_set100
 source ~/experiment_env.sh
@@ -372,12 +399,16 @@ for d in $(ls -td experiment/results/hold_* | head -3); do
   echo "=== $d ==="
   cat "$d/run_info.md" | grep -E "UPDATE_RATIO|start|end"
   TSC=$(awk '/cpu MHz/{print int($NF); exit}' /proc/cpuinfo)
-  python3 experiment/extract_hold_stats.py --dir "$d" --tsc-mhz "$TSC" 2>&1 | tail -3
+  # split 版は hold_item_summary.csv と hold_slabs_summary.csv の 2 CSV を出力
+  python3 experiment/extract_hold_stats.py --dir "$d" --tsc-mhz "$TSC" 2>&1 | tail -5
+  ls "$d"/N0/ | grep bin | head
 done
 ```
 
-- [ ] 3 dir すべて 40 N の hold_summary.csv がある
-- [ ] GET100 は Mixed / SET100 より CS 長 p50 が有意に短い (item_lock 単独 vs 混合)
+- [ ] 3 dir すべて `hold_item_summary.csv` と `hold_slabs_summary.csv` が生成
+- [ ] 各 N dir に `hold_samples_thread*.bin` (slabs) と `hold_item_samples_thread*.bin` (item) 両方
+- [ ] GET100 では item CS の p50 が Mixed / SET100 より有意に短い想定
+- [ ] SET100 では slabs CS の分布が Mixed より重くなる想定 (alloc/free 増加)
 
 **push** (3 回とも):
 ```bash
@@ -418,7 +449,7 @@ EXPERIMENT_TYPE=futex bash experiment/push_results.sh
 ```bash
 git ls-remote myfork | grep "$(date +%Y%m%d)"
 ```
-以下 6 本が存在するはず (`<arch>` は Ivy/Broadwell/Skylake/Ice/Emerald のいずれか):
+以下 6 本が存在するはず (`<arch>` は Broadwell/Skylake/Ice/Emerald のいずれか):
 
 **Phase 1**:
 - `experiment/results/<arch>-utdelay-YYYYMMDD`
@@ -459,11 +490,12 @@ ls experiment/results/$ARCH/
 ## 次のサーバへ
 
 同じ Step 1-9 を次のアーキで繰り返す:
-1. xl170 (Broadwell) ← 最初
-2. c8220 (Ivy Bridge)
-3. c220g5 (Skylake)
-4. sm110p (Sunny Cove / Ice Lake)
-5. c6620 (Emerald Rapids)
+1. xl170 (Broadwell)
+2. c220g5 (Skylake)
+3. sm110p (Sunny Cove / Ice Lake)
+4. c6620 (Emerald Rapids)
+
+**Ivy Bridge (c8220) は今回対象外** (Broadwell と PAUSE 特性ほぼ同じで追加知見なし)。
 
 ---
 
