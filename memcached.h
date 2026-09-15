@@ -763,11 +763,18 @@ typedef struct {
     uint32_t proxy_rng[4]; // fast per-thread rng for lua.
     // TODO: add ctx object so we can attach to queue.
 #endif
+    /* slabs_lock 系: spinlock_lock/unlock 経由の CS 長サンプル */
     uint64_t *hold_samples;    /* ring buffer: critical section length (rdtsc cycles) */
     uint32_t  hold_pos;
     uint32_t  hold_count;
     uint32_t  hold_buf_size;
     uint64_t  hold_total_count; /* 累積 CS 実行回数 (SIGUSR2 で reset) - per-thread 分布用 */
+    /* item_locks[] 系: item_spinlock_lock/unlock 経由の CS 長サンプル */
+    uint64_t *hold_item_samples;
+    uint32_t  hold_item_pos;
+    uint32_t  hold_item_count;
+    uint32_t  hold_item_buf_size;
+    uint64_t  hold_item_total_count;
 } LIBEVENT_THREAD;
 
 /**

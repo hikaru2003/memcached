@@ -24,16 +24,29 @@ int global_pause_per_round = 0;
 int global_hold_buf_size = (1 << 20); /* 1M samples per thread */
 
 __thread uint64_t tl_lock_start = 0;
+__thread uint64_t tl_item_lock_start = 0;
 static __thread LIBEVENT_THREAD *tl_me = NULL;
 
 void spinlock_record_hold(uint64_t delta) {
+    /* slabs_lock 系 (spinlock_lock/unlock 経由) */
     if (!tl_me || !tl_me->hold_samples)
         return;
     tl_me->hold_samples[tl_me->hold_pos] = delta;
     tl_me->hold_pos = (tl_me->hold_pos + 1) % tl_me->hold_buf_size;
     if (tl_me->hold_count < tl_me->hold_buf_size)
         tl_me->hold_count++;
-    tl_me->hold_total_count++;  /* ring buffer と独立の累積カウンタ */
+    tl_me->hold_total_count++;
+}
+
+void spinlock_record_item_hold(uint64_t delta) {
+    /* item_locks[] 系 (item_spinlock_lock/unlock 経由) */
+    if (!tl_me || !tl_me->hold_item_samples)
+        return;
+    tl_me->hold_item_samples[tl_me->hold_item_pos] = delta;
+    tl_me->hold_item_pos = (tl_me->hold_item_pos + 1) % tl_me->hold_item_buf_size;
+    if (tl_me->hold_item_count < tl_me->hold_item_buf_size)
+        tl_me->hold_item_count++;
+    tl_me->hold_item_total_count++;
 }
 
 #include "queue.h"
@@ -133,23 +146,23 @@ static void thread_libevent_ionotify(evutil_socket_t fd, short which, void *arg)
  */
 
 void item_lock(uint32_t hv) {
-    spinlock_lock(&item_locks[hv & hashmask(item_lock_hashpower)]);
+    item_spinlock_lock(&item_locks[hv & hashmask(item_lock_hashpower)]);
 }
 
 void *item_trylock(uint32_t hv) {
     spinlock_t *lock = &item_locks[hv & hashmask(item_lock_hashpower)];
-    if (spinlock_trylock(lock) == 0) {
+    if (item_spinlock_trylock(lock) == 0) {
         return lock;
     }
     return NULL;
 }
 
 void item_trylock_unlock(void *lock) {
-    spinlock_unlock((spinlock_t *) lock);
+    item_spinlock_unlock((spinlock_t *) lock);
 }
 
 void item_unlock(uint32_t hv) {
-    spinlock_unlock(&item_locks[hv & hashmask(item_lock_hashpower)]);
+    item_spinlock_unlock(&item_locks[hv & hashmask(item_lock_hashpower)]);
 }
 
 static void wait_for_thread_registration(int nthreads) {
@@ -475,6 +488,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
         exit(EXIT_FAILURE);
     }
 
+    /* slabs_lock 系バッファ */
     me->hold_buf_size = (uint32_t)global_hold_buf_size;
     me->hold_samples  = calloc(me->hold_buf_size, sizeof(uint64_t));
     me->hold_pos      = 0;
@@ -482,6 +496,17 @@ static void setup_thread(LIBEVENT_THREAD *me) {
     me->hold_total_count = 0;
     if (!me->hold_samples) {
         fprintf(stderr, "Failed to allocate hold sample buffer\n");
+        exit(EXIT_FAILURE);
+    }
+
+    /* item_locks[] 系バッファ (分離計測用) */
+    me->hold_item_buf_size = (uint32_t)global_hold_buf_size;
+    me->hold_item_samples  = calloc(me->hold_item_buf_size, sizeof(uint64_t));
+    me->hold_item_pos      = 0;
+    me->hold_item_count    = 0;
+    me->hold_item_total_count = 0;
+    if (!me->hold_item_samples) {
+        fprintf(stderr, "Failed to allocate hold_item sample buffer\n");
         exit(EXIT_FAILURE);
     }
     // Note: we were cleanly passing in num_threads before, but this now
