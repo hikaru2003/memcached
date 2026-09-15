@@ -184,21 +184,81 @@ futex は utdelay バイナリで測定可能 (perf trace で拾う)。
 
 ---
 
-## Phase 2: Skylake ann 限定 (メカニズム解明)
+## Phase 2: 全アーキで unlock / hold / futex (メカニズム解明、~35h/サーバ)
 
-- [ ] **Step 2-add**: memcached_unlock_debug, memcached_hold_debug ビルド
-- [ ] **2-a**: unlock_sweep (7h) — `bash experiment/run_unlock_sweep.sh`
-- [ ] **結果確認**: unlock latency mean が N と共に単調減少していることを確認
-- [ ] **2-b**: hold_sweep (SET+GET 50/50 mixed) (7h) — `bash experiment/run_hold_sweep.sh`
-- [ ] **結果確認**: CS 長分布 (p50, mean) を確認
-- [ ] **2-c**: hold_sweep (GET 100%) (7h) — `UPDATE_RATIO=0.0 bash experiment/run_hold_sweep.sh` (SET 割合のみ上書き)
-- [ ] **結果確認**: item_lock 単体競合の CS 長を確認
-- [ ] **2-d**: futex_sweep (7h) — `bash experiment/run_futex_sweep.sh`
-- [ ] **結果確認**: futex/req が N と共に減少 (N=1 で激減) を確認
+**方針**: mechanism 分析データを全アーキで揃える (unlock latency も CS 長もアーキで変わる想定)。
+setup_cloudlab.sh がすでに memcached_unlock_debug と memcached_hold_debug をビルドするので、追加ビルド不要。
+
+**各 cloudlab サーバでの Phase 2 実験** (各実験 ~7h):
+
+- [ ] **Pre**: `sudo sh -c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'` (futex tracepoint 用)
+- [ ] **2-a**: `unlock_sweep` — `MEMCACHED_BIN=$MEMCACHED_UNLOCK_BIN bash experiment/run_unlock_sweep.sh`
+- [ ] **結果確認**: unlock latency mean が N と共に単調減少しているか
+- [ ] **push**: `EXPERIMENT_TYPE=unlock bash experiment/push_results.sh`
+- [ ] **2-b**: `hold_sweep (mixed 50/50)` — `MEMCACHED_BIN=$MEMCACHED_HOLD_BIN bash experiment/run_hold_sweep.sh`
+- [ ] **結果確認**: CS 長分布 (p50, mean)
+- [ ] **push**: `EXPERIMENT_TYPE=hold bash experiment/push_results.sh`
+- [ ] **2-c**: `hold_sweep (GET 100%)` — `UPDATE_RATIO=0.0 MEMCACHED_BIN=$MEMCACHED_HOLD_BIN bash experiment/run_hold_sweep.sh`
+- [ ] **結果確認**: item_lock 単独競合の CS 長 (mixed より短い想定)
+- [ ] **push**: `EXPERIMENT_TYPE=hold bash experiment/push_results.sh`
+- [ ] **2-d**: `hold_sweep (SET 100%)` — `UPDATE_RATIO=1.0 MEMCACHED_BIN=$MEMCACHED_HOLD_BIN bash experiment/run_hold_sweep.sh`
+- [ ] **結果確認**: item_lock + slabs_lock の CS 長 (mixed より長い想定)
+- [ ] **push**: `EXPERIMENT_TYPE=hold bash experiment/push_results.sh`
+- [ ] **2-e**: `futex_sweep` — `unset MEMCACHED_BIN && bash experiment/run_futex_sweep.sh`
+- [ ] **結果確認**: futex/req が N と共に減少 (N=1 で激減)
+- [ ] **push**: `EXPERIMENT_TYPE=futex bash experiment/push_results.sh`
+
+**サーバ別チェック** (全 5 アーキで実施):
+- [ ] Ivy Bridge (c8220) — Phase 2 完了
+- [ ] Broadwell (xl170) — Phase 2 完了
+- [ ] Skylake (c220g5) — Phase 2 完了
+- [ ] Sunny Cove (sm110p) — Phase 2 完了
+- [ ] Emerald Rapids (c6620) — Phase 2 完了
+
+**サーバ 1 台あたり総所要時間**: 7h × 5 実験 = **~35h** (2 泊 3 日、並列で 1 日半)
 
 ---
 
-## Phase 3: 全結果の収集と可視化
+## Phase 3: 感度実験 (UPDATE_RATIO × RECORDS)
+
+Phase 1/2 で確定した「アーキごとに peak N が異なる」を、ワークロード変化でも同様に成り立つか検証する。
+
+### Phase 3-a: UPDATE_RATIO 感度 (utdelay、3 アーキ、~42h/アーキ 並列)
+
+**対象アーキ**: Broadwell + Skylake + Emerald (peak N 対極 + budget outlier)
+
+**追加パターン** (default 0.5 は既存):
+- [ ] Broadwell / UPDATE_RATIO=0.0 (GET 100%) — `UPDATE_RATIO=0.0 bash experiment/run_utdelay_sweep_p999.sh` (~21h)
+- [ ] Broadwell / UPDATE_RATIO=1.0 (SET 100%) — `UPDATE_RATIO=1.0 bash experiment/run_utdelay_sweep_p999.sh` (~21h)
+- [ ] Skylake  / UPDATE_RATIO=0.0
+- [ ] Skylake  / UPDATE_RATIO=1.0
+- [ ] Emerald  / UPDATE_RATIO=0.0
+- [ ] Emerald  / UPDATE_RATIO=1.0
+
+**push**: `EXPERIMENT_TYPE=utdelay bash experiment/push_results.sh` (同じ日 or 別ラベル追加が要検討)
+
+**分析**: 3 パターン (0.0/0.5/1.0) を並べて、peak N がどう動くかを見る。**最も peak N がシフトしそうな設定**を Phase 3-b の対象にする。
+
+### Phase 3-b: RECORDS 感度 (utdelay、Phase 3-a で選定した UPDATE_RATIO のみ)
+
+**RECORDS 値の候補** (現状 default = 1 = 単一 hot key 最大競合):
+- 1 (default、既存データ)
+- 10,000 (~10k、中規模: セッションストア、CDN edge cache)
+- 1,000,000 (~1M、大規模: 商品カタログ、ユーザプロファイル)
+
+**対象**: Phase 3-a の分析で選んだ UPDATE_RATIO × 3 アーキ (Broadwell + Skylake + Emerald)
+
+**追加パターン**:
+- [ ] Broadwell / 選定 UPDATE_RATIO / RECORDS=10000 — `RECORDS=10000 UPDATE_RATIO=<x> bash experiment/run_utdelay_sweep_p999.sh` (~21h)
+- [ ] Broadwell / 選定 UPDATE_RATIO / RECORDS=1000000
+- [ ] Skylake / (同上、2 パターン)
+- [ ] Emerald / (同上、2 パターン)
+
+**分析**: contention 度が下がると peak N がどう動くか、絶対改善率がどう縮むかを見る。**「PAUSE tuning はどのシチュエーションで効くか」**を定量化する。
+
+---
+
+## Phase 4: 全結果の収集と可視化
 
 - [ ] cloudlab 5 サーバから ann サーバへ結果を pull
   ```bash
@@ -208,14 +268,13 @@ futex は utdelay バイナリで測定可能 (perf trace で拾う)。
   ```bash
   for a in ivybridge broadwell skylake icelake emeraldrapids skylake_ann; do echo "== $a =="; ls experiment/results/$a/; done
   ```
-- [ ] グラフ再生成 (plots/v4/ に出力)
+- [ ] 5 アーキで揃うグラフ再生成
   ```bash
-  OUTPUT_DIR=experiment/results/plots/v4 python3 experiment/plot_handoff_comparison.py
-  OUTPUT_DIR=experiment/results/plots/v4 python3 experiment/plot_cache_miss_comparison.py
-  OUTPUT_DIR=experiment/results/plots/v4 python3 experiment/plot_futex_comparison.py
-  # ann 単独系:
-  python3 experiment/plot_unlock_sweep.py --dir experiment/results/skylake_ann/unlock_<latest>/ --outdir experiment/results/plots/v4
-  python3 experiment/plot_futex_rfo_ann.py  # FUTEX_CSV / RFO_CSV パスを最新に更新して実行
+  OUTPUT_DIR=experiment/results/plots/v5 python3 experiment/plot_qps_production.py       # QPS 4-5 archs
+  OUTPUT_DIR=experiment/results/plots/v5 python3 experiment/plot_handoff_comparison.py   # handoff (cycles)
+  OUTPUT_DIR=experiment/results/plots/v5 python3 experiment/plot_cache_miss_comparison.py
+  OUTPUT_DIR=experiment/results/plots/v5 python3 experiment/plot_futex_comparison.py
+  # unlock / hold 全アーキ比較スクリプトは Phase 2 完了後に新規作成
   ```
 - [ ] research_summary.html の数値・グラフを最新に更新
 
@@ -223,14 +282,16 @@ futex は utdelay バイナリで測定可能 (perf trace で拾う)。
 
 ## 実行順序の推奨
 
-1. **cloudlab 5 サーバ順次** (1 サーバ 36h、各 2 泊 3 日相当)
-   - 順: c8220 (Ivy) → xl170 (Broadwell) → c220g5 (Skylake) → sm110 (Sunny Cove) → c6620 (Emerald)
-   - サーバ返却前に必ず push
-2. **ann 継続実行** (合計 64h、分割で 3-4 泊)
-   - 日中: Phase 2 (unlock 7h、hold_mixed 7h)
-   - 夜間: Phase 2 (hold_get100 7h、futex 7h)
-   - 追加: Phase 1 (handoff 7h、cache_miss 7h) を優先実施 (utdelay 21h は cloudlab-skylake で取れたら省略可)
-3. **Phase 3 の集計・可視化**
+1. **cloudlab 5 サーバ順次 Phase 1** (1 サーバ 36h、各 2 泊 3 日相当)
+   - 順: c8220 (Ivy) → xl170 (Broadwell) → c220g5 (Skylake) → sm110p (Sunny Cove) → c6620 (Emerald)
+   - サーバ返却前に必ず 3 種 push
+2. **cloudlab 5 サーバ Phase 2** (setup_cloudlab.sh 更新後、~35h/サーバ)
+   - 全アーキで unlock + hold × 3 + futex を回す
+   - Phase 1 と同じサーバで連続実施できる場合はそのまま
+3. **Phase 3 sensitivity** (Broadwell + Skylake + Emerald)
+   - Phase 3-a: UPDATE_RATIO 0.0/1.0 各アーキ 2×21h = 42h/サーバ (並列で 42h wall)
+   - Phase 3-b: 選定 UPDATE_RATIO で RECORDS 変更、2 パターン × 3 アーキ (並列で 42h wall)
+4. **Phase 4 集計・可視化・論文執筆**
 
 ---
 

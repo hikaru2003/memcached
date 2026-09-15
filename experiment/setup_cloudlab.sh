@@ -7,12 +7,13 @@
 #   CloudLab サーバ（Ubuntu 24.04）での memcached + mutilate セットアップ。
 #   - OS パッケージのインストール（apt のみ）
 #   - results ブランチを /users/Morisaki/memcached/ にクローン（実験スクリプト用）
-#   - memcached バイナリを 4 ブランチからビルドして /users/Morisaki/memcached/ に配置
+#   - memcached バイナリを 6 ブランチからビルドして /users/Morisaki/memcached/ に配置
 #       experiment/mysql-like-utdelay -> memcached                 (utdelay/cache_miss/futex 用)
 #       master                        -> memcached_master          (baseline 比較用)
 #       debug/wait-time               -> memcached_wait_debug      (wait 分布計測用、旧実験)
 #       debug/handoff-latency         -> memcached_handoff_debug   (handoff latency 計測用)
-#     ※ Phase 2 (unlock/hold) の debug バイナリは ann 限定なのでビルドしない
+#       debug/unlock-latency          -> memcached_unlock_debug    (Phase 2: unlock latency)
+#       debug/hold-time-v2            -> memcached_hold_debug      (Phase 2: CS 長)
 #   - leverich/mutilate (standard + p999 patched) のビルド
 #   - アーキテクチャ判定・env プリセット生成 (~/experiment_env.sh)
 #   - myfork remote (git@github.com:hikaru2003/memcached.git) 設定
@@ -166,6 +167,48 @@ if [ -z "$SKIP_BUILD" ]; then
     fi
     cp "$HANDOFF_BUILD_DIR/memcached" "$MC_DIR/memcached_handoff_debug"
     echo "  Built: $MC_DIR/memcached_handoff_debug"
+    cd - >/dev/null
+
+    # debug/unlock-latency バイナリのビルド（unlock latency 実験用、Phase 2）
+    echo "  Building memcached_unlock_debug (debug/unlock-latency branch) ..."
+    UNLOCK_BUILD_DIR="${BASE_DIR}/memcached_unlock_src"
+    if [ -d "$UNLOCK_BUILD_DIR/.git" ]; then
+        git -C "$UNLOCK_BUILD_DIR" fetch origin debug/unlock-latency 2>&1 | tail -2 || true
+        git -C "$UNLOCK_BUILD_DIR" checkout debug/unlock-latency 2>&1 | tail -1 || true
+        git -C "$UNLOCK_BUILD_DIR" pull origin debug/unlock-latency 2>&1 | tail -2 || true
+    else
+        git clone --branch debug/unlock-latency "$MC_REPO" "$UNLOCK_BUILD_DIR"
+    fi
+    cd "$UNLOCK_BUILD_DIR"
+    ./autogen.sh 2>&1 | tail -3
+    ./configure 2>&1 | tail -5
+    make -j"$(nproc)" 2>&1 | tail -5
+    if [ ! -x "$UNLOCK_BUILD_DIR/memcached" ]; then
+        echo "[ERROR] memcached_unlock_debug build failed" >&2; exit 1
+    fi
+    cp "$UNLOCK_BUILD_DIR/memcached" "$MC_DIR/memcached_unlock_debug"
+    echo "  Built: $MC_DIR/memcached_unlock_debug"
+    cd - >/dev/null
+
+    # debug/hold-time-v2 バイナリのビルド（CS 長 (hold time) 実験用、Phase 2）
+    echo "  Building memcached_hold_debug (debug/hold-time-v2 branch) ..."
+    HOLD_BUILD_DIR="${BASE_DIR}/memcached_hold_src"
+    if [ -d "$HOLD_BUILD_DIR/.git" ]; then
+        git -C "$HOLD_BUILD_DIR" fetch origin debug/hold-time-v2 2>&1 | tail -2 || true
+        git -C "$HOLD_BUILD_DIR" checkout debug/hold-time-v2 2>&1 | tail -1 || true
+        git -C "$HOLD_BUILD_DIR" pull origin debug/hold-time-v2 2>&1 | tail -2 || true
+    else
+        git clone --branch debug/hold-time-v2 "$MC_REPO" "$HOLD_BUILD_DIR"
+    fi
+    cd "$HOLD_BUILD_DIR"
+    ./autogen.sh 2>&1 | tail -3
+    ./configure 2>&1 | tail -5
+    make -j"$(nproc)" 2>&1 | tail -5
+    if [ ! -x "$HOLD_BUILD_DIR/memcached" ]; then
+        echo "[ERROR] memcached_hold_debug build failed" >&2; exit 1
+    fi
+    cp "$HOLD_BUILD_DIR/memcached" "$MC_DIR/memcached_hold_debug"
+    echo "  Built: $MC_DIR/memcached_hold_debug"
     cd - >/dev/null
 fi
 echo "[2/4] Done."
@@ -333,8 +376,10 @@ export MEMCACHED_BIN="\${MC_DIR}/memcached"
 export MEMCACHED_MASTER_BIN="\${MC_DIR}/memcached_master"
 export MUTILATE_BIN="\${MUTILATE_DIR}/mutilate_p999"
 
-# handoff sweep 用
+# handoff / unlock / hold sweep 用 debug バイナリ
 export MEMCACHED_HANDOFF_BIN="\${MC_DIR}/memcached_handoff_debug"
+export MEMCACHED_UNLOCK_BIN="\${MC_DIR}/memcached_unlock_debug"
+export MEMCACHED_HOLD_BIN="\${MC_DIR}/memcached_hold_debug"
 
 # CPU affinity (memcached 0-3, mutilate 4-7)
 export MC_CPUS="${MC_CPUS_REC}"
@@ -343,6 +388,19 @@ export WL_CPUS="${WL_CPUS_REC}"
 # その他のパラメータ (MC_THREADS, WARMUP_SEC, DURATION, RUNS, PAUSE_PER_ROUND_VALUES 等) は
 # 各 run_*_sweep.sh のデフォルトが新プランと一致しているので上書き不要。
 # 詳細: cd \$MC_DIR && cat experiment/CURRENT_EXPERIMENTS.md
+#
+# 実行例 (Phase 1):
+#   bash experiment/run_utdelay_sweep_p999.sh          # utdelay (~21h)
+#   MEMCACHED_BIN=\$MEMCACHED_HANDOFF_BIN bash experiment/run_handoff_sweep.sh   # handoff (~7h)
+#   bash experiment/run_cache_miss_sweep.sh            # cache_miss (~7h)
+#
+# 実行例 (Phase 2):
+#   sudo sh -c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'   # futex 必須
+#   MEMCACHED_BIN=\$MEMCACHED_UNLOCK_BIN bash experiment/run_unlock_sweep.sh    # unlock (~7h)
+#   MEMCACHED_BIN=\$MEMCACHED_HOLD_BIN   bash experiment/run_hold_sweep.sh      # hold mixed (~7h)
+#   UPDATE_RATIO=0.0 MEMCACHED_BIN=\$MEMCACHED_HOLD_BIN bash experiment/run_hold_sweep.sh  # get100 (~7h)
+#   UPDATE_RATIO=1.0 MEMCACHED_BIN=\$MEMCACHED_HOLD_BIN bash experiment/run_hold_sweep.sh  # set100 (~7h)
+#   bash experiment/run_futex_sweep.sh                 # futex (~7h)
 ENV_EOF
 chmod +x "$ENV_PRESET"
 
@@ -381,6 +439,8 @@ echo "   memcached (utdelay)     : $MC_DIR/memcached"
 echo "   memcached_master        : $MC_DIR/memcached_master"
 echo "   memcached_wait_debug    : $MC_DIR/memcached_wait_debug"
 echo "   memcached_handoff_debug : $MC_DIR/memcached_handoff_debug"
+echo "   memcached_unlock_debug  : $MC_DIR/memcached_unlock_debug   (Phase 2 unlock latency)"
+echo "   memcached_hold_debug    : $MC_DIR/memcached_hold_debug     (Phase 2 CS 長)"
 echo "   mutilate                : $MUTILATE_DIR/mutilate"
 echo "   mutilate_p999           : $MUTILATE_DIR/mutilate_p999"
 echo ""
@@ -398,10 +458,17 @@ echo " 実験コマンド (Phase 1、utdelay の例、~21h):"
 echo "   source ~/experiment_env.sh && cd \$MC_DIR"
 echo "   bash experiment/run_utdelay_sweep_p999.sh 2>&1 | tee /tmp/utdelay.log"
 echo ""
+echo " 実験コマンド (Phase 2、unlock の例、~7h):"
+echo "   MEMCACHED_BIN=\$MEMCACHED_UNLOCK_BIN bash experiment/run_unlock_sweep.sh 2>&1 | tee /tmp/unlock.log"
+echo " (hold は MEMCACHED_HOLD_BIN、futex は デフォルトバイナリ + perf_event_paranoid=-1 が必要)"
+echo ""
 echo " 結果 push (arch は setup で自動判別済):"
 echo "   EXPERIMENT_TYPE=utdelay    bash experiment/push_results.sh"
 echo "   EXPERIMENT_TYPE=handoff    bash experiment/push_results.sh"
 echo "   EXPERIMENT_TYPE=cache_miss bash experiment/push_results.sh"
+echo "   EXPERIMENT_TYPE=unlock     bash experiment/push_results.sh"
+echo "   EXPERIMENT_TYPE=hold       bash experiment/push_results.sh"
+echo "   EXPERIMENT_TYPE=futex      bash experiment/push_results.sh"
 echo ""
 echo " ※ GitHub push は ssh -A でログインすれば agent forwarding で認証される"
 echo "============================================================"

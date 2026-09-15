@@ -129,10 +129,10 @@ LATEST=$(ls -td experiment/results/cache_miss_* | head -1)
 head -3 "$LATEST/summary.csv"
 ```
 
-### D-4. futex_sweep (Phase 2 = ann 限定)
+### D-4. futex_sweep (Phase 2、全アーキ対象)
 
 ```bash
-# 事前確認: perf_event_paranoid == -1 必要
+# 事前確認: perf_event_paranoid == -1 必要 (tracepoint syscall アクセスのため)
 sudo sh -c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'
 
 PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
@@ -141,12 +141,13 @@ PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
 
 - [ ] `summary.csv` の `futex_per_req` 列が数値 (N=0 で 0.5 前後、master で 1〜2 前後)
 
-### D-5. unlock_sweep (ann 限定)
+### D-5. unlock_sweep (Phase 2、全アーキ対象)
 
-**バイナリ必要**: `./memcached_unlock_debug`
+**バイナリ必要**: `$MEMCACHED_UNLOCK_BIN` (setup_cloudlab.sh でビルド済 `/users/Morisaki/memcached/memcached_unlock_debug`)
 
 ```bash
-PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
+MEMCACHED_BIN="$MEMCACHED_UNLOCK_BIN" \
+  PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
   bash experiment/run_unlock_sweep.sh 2>&1 | tail -20
 ```
 
@@ -160,17 +161,27 @@ python3 experiment/extract_unlock_stats.py --dir "$LATEST" --tsc-mhz $(awk '/cpu
 
 - [ ] `unlock_summary.csv` の p50/p99/mean_us が妥当
 
-### D-6. hold_sweep (ann 限定)
+### D-6. hold_sweep (Phase 2、全アーキ対象)
 
-**バイナリ必要**: `./memcached_hold_debug`
+**バイナリ必要**: `$MEMCACHED_HOLD_BIN` (setup_cloudlab.sh でビルド済 `/users/Morisaki/memcached/memcached_hold_debug`)
 
 ```bash
-PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
+MEMCACHED_BIN="$MEMCACHED_HOLD_BIN" \
+  PAUSE_PER_ROUND_VALUES="0" WARMUP_SEC=10 DURATION=10 RUNS=1 \
   bash experiment/run_hold_sweep.sh 2>&1 | tail -20
 ```
 
 - [ ] `N0/hold_samples_thread*.bin` が非ゼロ
-- [ ] `extract_hold_stats.py` で p50/p99 が妥当
+
+確認:
+```bash
+LATEST=$(ls -td experiment/results/hold_* | head -1)
+python3 experiment/extract_hold_stats.py --dir "$LATEST" --tsc-mhz $(awk '/cpu MHz/{print int($NF); exit}' /proc/cpuinfo) 2>&1 | tail -5
+```
+
+- [ ] `hold_summary.csv` の p50/p99/mean_us が妥当
+
+**note**: 本番の hold_sweep は 3 パターン (UPDATE_RATIO=0.0/0.5/1.0) で回す予定だが、smoke は default (0.5) だけで十分。
 
 ---
 

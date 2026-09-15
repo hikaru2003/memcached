@@ -295,28 +295,150 @@ EXPERIMENT_TYPE=cache_miss bash experiment/push_results.sh
 
 ---
 
-## Step 9. サーバ返却前チェックリスト
+## Step 9. 本番: Phase 2 (unlock + hold + futex、合計 ~35 時間)
 
-**myfork リモートで 3 ブランチ確認**:
+Phase 1 (utdelay + handoff + cache_miss) が完了したら Phase 2。**5 種類の実験**を順次実行する。
+
+### Step 9-a. 事前セットアップ (30 秒)
+
+```bash
+# futex sweep が tracepoint syscall を使うため必須
+sudo sh -c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'
+cat /proc/sys/kernel/perf_event_paranoid   # -1 と表示されればOK
+```
+
+### Step 9-b. unlock_sweep (~7h)
+
+```bash
+tmux new -s unlock
+```
+
+tmux 内:
+```bash
+source ~/experiment_env.sh
+cd /users/Morisaki/memcached
+export MEMCACHED_BIN="$MEMCACHED_UNLOCK_BIN"
+bash experiment/run_unlock_sweep.sh 2>&1 | tee /tmp/unlock.log
+```
+
+**完了確認**:
+```bash
+LATEST=$(ls -td experiment/results/unlock_* | head -1)
+TSC=$(awk '/cpu MHz/{print int($NF); exit}' /proc/cpuinfo)
+python3 experiment/extract_unlock_stats.py --dir "$LATEST" --tsc-mhz "$TSC"
+head -5 "$LATEST/unlock_summary.csv"
+```
+
+- [ ] 40 N すべて出力あり
+- [ ] mean unlock latency が N 増加で単調減少している
+
+**push**:
+```bash
+EXPERIMENT_TYPE=unlock bash experiment/push_results.sh
+```
+
+### Step 9-c. hold_sweep × 3 パターン (~21h、UPDATE_RATIO 3 種)
+
+**Mixed (SET/GET 50/50、default)**:
+```bash
+tmux new -s hold_mixed
+source ~/experiment_env.sh
+cd /users/Morisaki/memcached
+export MEMCACHED_BIN="$MEMCACHED_HOLD_BIN"
+bash experiment/run_hold_sweep.sh 2>&1 | tee /tmp/hold_mixed.log
+```
+
+**GET 100%** (item_lock 単独競合の CS 長):
+```bash
+tmux new -s hold_get100
+source ~/experiment_env.sh
+cd /users/Morisaki/memcached
+export MEMCACHED_BIN="$MEMCACHED_HOLD_BIN"
+UPDATE_RATIO=0.0 bash experiment/run_hold_sweep.sh 2>&1 | tee /tmp/hold_get100.log
+```
+
+**SET 100%** (item_lock + slabs_lock 両方の CS 長):
+```bash
+tmux new -s hold_set100
+source ~/experiment_env.sh
+cd /users/Morisaki/memcached
+export MEMCACHED_BIN="$MEMCACHED_HOLD_BIN"
+UPDATE_RATIO=1.0 bash experiment/run_hold_sweep.sh 2>&1 | tee /tmp/hold_set100.log
+```
+
+**3 パターン全て完了後の確認**:
+```bash
+for d in $(ls -td experiment/results/hold_* | head -3); do
+  echo "=== $d ==="
+  cat "$d/run_info.md" | grep -E "UPDATE_RATIO|start|end"
+  TSC=$(awk '/cpu MHz/{print int($NF); exit}' /proc/cpuinfo)
+  python3 experiment/extract_hold_stats.py --dir "$d" --tsc-mhz "$TSC" 2>&1 | tail -3
+done
+```
+
+- [ ] 3 dir すべて 40 N の hold_summary.csv がある
+- [ ] GET100 は Mixed / SET100 より CS 長 p50 が有意に短い (item_lock 単独 vs 混合)
+
+**push** (3 回とも):
+```bash
+EXPERIMENT_TYPE=hold bash experiment/push_results.sh
+```
+※ 3 dir 全部を 1 ブランチに push する。または UPDATE_RATIO ごとに Prefix を分けるなら別途対応。
+
+### Step 9-d. futex_sweep (~7h)
+
+```bash
+tmux new -s futex
+source ~/experiment_env.sh
+cd /users/Morisaki/memcached
+unset MEMCACHED_BIN   # utdelay バイナリに戻す
+bash experiment/run_futex_sweep.sh 2>&1 | tee /tmp/futex.log
+```
+
+**完了確認**:
+```bash
+LATEST=$(ls -td experiment/results/futex_* | head -1)
+head -5 "$LATEST/summary.csv"
+```
+
+- [ ] `futex_per_req` 列が数値
+- [ ] N 増加で futex 発行数が減少 (N=1 で急減、N≥5 でほぼゼロ)
+
+**push**:
+```bash
+EXPERIMENT_TYPE=futex bash experiment/push_results.sh
+```
+
+---
+
+## Step 10. サーバ返却前チェックリスト
+
+**myfork リモートで 6 ブランチ確認**:
 
 ```bash
 git ls-remote myfork | grep "$(date +%Y%m%d)"
 ```
-以下 3 本が存在するはず (`<arch>` は Ivy/Broadwell/Skylake/Ice/Emerald のいずれか):
+以下 6 本が存在するはず (`<arch>` は Ivy/Broadwell/Skylake/Ice/Emerald のいずれか):
+
+**Phase 1**:
 - `experiment/results/<arch>-utdelay-YYYYMMDD`
 - `experiment/results/<arch>-handoff-YYYYMMDD`
 - `experiment/results/<arch>-cache_miss-YYYYMMDD`
 
-- [ ] utdelay 完了 + push 済み
-- [ ] handoff 完了 + push 済み
-- [ ] cache_miss 完了 + push 済み
-- [ ] 3 ブランチが GitHub 上にある
+**Phase 2**:
+- `experiment/results/<arch>-unlock-YYYYMMDD`
+- `experiment/results/<arch>-hold-YYYYMMDD`
+- `experiment/results/<arch>-futex-YYYYMMDD`
+
+- [ ] Phase 1 (utdelay + handoff + cache_miss) push 済み
+- [ ] Phase 2 (unlock + hold × 3 + futex) push 済み
+- [ ] 6 ブランチが GitHub 上にある
 
 **サーバ返却**: cloudlab の Experiment 画面 → **Terminate**
 
 ---
 
-## Step 10. ann 側で結果収集
+## Step 11. ann 側で結果収集
 
 **ann に戻ってから**:
 ```bash
