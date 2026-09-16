@@ -137,6 +137,36 @@ stage_files() {
             echo "[ERROR] cache_miss result files not found. run_cache_miss_sweep.sh を先に実行してください。" >&2
             exit 1
         fi
+    elif [ "$EXPERIMENT_TYPE" = "unlock" ]; then
+        # unlock: unlock_summary.csv / run_info.md のみ（.bin/run.log は除外、サイズ大）
+        # extract_unlock_stats.py が summary.csv を生成しておく必要あり
+        local found=0
+        while IFS= read -r -d '' f; do
+            git add -f "$f"
+            found=$((found + 1))
+        done < <(find "$RESULT_DIR" -path "*/unlock_*" \
+            \( -name "unlock_summary.csv" -o -name "run_info.md" \) -print0)
+        echo "  staged $found file(s) for unlock experiment"
+        if [ "$found" -eq 0 ]; then
+            echo "[ERROR] unlock_summary.csv not found. extract_unlock_stats.py を先に実行してください。" >&2
+            exit 1
+        fi
+    elif [ "$EXPERIMENT_TYPE" = "hold" ]; then
+        # hold: hold_summary.csv / hold_item_summary.csv / hold_slabs_summary.csv (split 版) / run_info.md
+        # extract_hold_stats.py が summary CSV を生成しておく必要あり
+        local found=0
+        while IFS= read -r -d '' f; do
+            git add -f "$f"
+            found=$((found + 1))
+        done < <(find "$RESULT_DIR" -path "*/hold_*" \
+            \( -name "hold_summary.csv" -o -name "hold_item_summary.csv" \
+               -o -name "hold_slabs_summary.csv" -o -name "hold_counts.txt" \
+               -o -name "run_info.md" \) -print0)
+        echo "  staged $found file(s) for hold experiment"
+        if [ "$found" -eq 0 ]; then
+            echo "[ERROR] hold_*_summary.csv not found. extract_hold_stats.py を先に実行してください。" >&2
+            exit 1
+        fi
     else
         # utdelay: raw.csv / summary.md / run_info.md / raw/*.log
         local found=0
