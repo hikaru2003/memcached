@@ -205,12 +205,19 @@ run_one_config() {
     # SIGUSR2 で hold サンプル + per-thread カウンタをダンプ
     kill -USR2 "$MC_PID"
     sleep 1
+    # slabs_lock 系: hold_samples_thread*.bin
     if mv hold_samples_thread*.bin "$out_dir/" 2>/dev/null; then
         local nfiles
         nfiles=$(ls "$out_dir"/hold_samples_thread*.bin 2>/dev/null | wc -l)
-        echo "  samples dumped: $nfiles files -> $out_dir/"
+        echo "  slabs samples dumped: $nfiles files -> $out_dir/"
     else
         echo "[WARN] no hold_samples_thread*.bin found for $label"
+    fi
+    # item_locks[] 系: hold_item_samples_thread*.bin (split バイナリのみ、無ければ warning 不要)
+    if mv hold_item_samples_thread*.bin "$out_dir/" 2>/dev/null; then
+        local nfiles_item
+        nfiles_item=$(ls "$out_dir"/hold_item_samples_thread*.bin 2>/dev/null | wc -l)
+        echo "  item  samples dumped: $nfiles_item files -> $out_dir/"
     fi
     mv hold_counts.txt "$out_dir/" 2>/dev/null || echo "[WARN] no hold_counts.txt for $label"
 
