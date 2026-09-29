@@ -40,7 +40,6 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import numpy as np
 from scipy.interpolate import PchipInterpolator
-from scipy.ndimage import gaussian_filter1d
 
 
 # ---------------------------------------------------------------------------
@@ -149,17 +148,15 @@ def _load_all():
     return result
 
 
-def _smooth_curve(xs_data, ys_data, n_samples=500, sigma_frac=0.02):
-    """PCHIP で密な補間を作った後、Gaussian で平滑化して論文向けの滑らかな曲線を返す。
+def _smooth_curve(xs_data, ys_data, n_samples=500):
+    """PCHIP による単調保存の三次補間。全実測点を通過し、点間のみ滑らかに補間する。
 
-    - PCHIP: piecewise cubic Hermite (monotonic-preserving)、peak を overshoot しない
-    - Gaussian: N=[0..200] の 500 点の内 sigma=n_samples*sigma_frac (default 10 点) で平滑化
-
-    sigma_frac を大きくすると更に滑らか、小さくすると原データに忠実。
+    PCHIP (piecewise cubic Hermite interpolating polynomial) は各測定点を
+    厳密に通過するため、実測値の位置が曲線上に保持される。三次補間なので
+    測定点が疎な区間では滑らかにつなぎ、peak を overshoot しない。
     """
     xs = np.linspace(min(xs_data), max(xs_data), n_samples)
     ys = PchipInterpolator(xs_data, ys_data)(xs)
-    ys = gaussian_filter1d(ys, sigma=n_samples * sigma_frac)
     return xs, ys
 
 
