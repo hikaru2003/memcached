@@ -1,0 +1,14 @@
+# Run info (futex sweep)
+- date: 2026-10-19 15:03:33
+- commit: 5d9eaa22
+- branch: results
+- utdelay_bin: ./memcached
+- master_bin:  ./memcached_master
+- mutilate_bin: ../mutilate/mutilate_p999
+- perf_event: syscalls:sys_enter_futex
+- mc_threads: 4 (cpus: 0-3)
+- mut: -T 4 -c 1 -d 32 -r 1 -u 0.5
+- warmup: 60s / duration: 60s / runs: 1
+- spin_rounds: 30 (fixed)
+- pause_per_round values: 10
+- est_time: ~4 min
