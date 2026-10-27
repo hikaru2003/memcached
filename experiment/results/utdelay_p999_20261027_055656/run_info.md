@@ -1,0 +1,13 @@
+# Run info (utdelay p999 sweep)
+- date: 2026-10-27 05:56:56
+- commit: 5d9eaa22
+- branch: results
+- utdelay_bin: ./memcached
+- master_bin:  ./memcached_master
+- mutilate_bin: ../mutilate/mutilate_p999
+- mc_threads: 4 (cpus: 0-3)
+- mut: -T 4 -c 1 -d 32 -r 10000 -u 0.5
+- warmup: 120s / duration: 60s / runs: 3
+- spin_rounds: 30 (fixed)
+- pause_per_round values: 0 2 5 10 20 50 100 200
+- est_time: ~45 min
